@@ -1,0 +1,9 @@
+packages:
+  - apps/*
+  - packages/*
+nodeLinker: hoisted
+packageImportMethod: copy
+storeDir: .pnpm-store
+allowBuilds:
+  esbuild: true
+  mongodb-memory-server: true
