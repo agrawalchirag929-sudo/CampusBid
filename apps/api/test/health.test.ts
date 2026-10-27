@@ -1,11 +1,11 @@
 import mongoose, { Types } from 'mongoose';
 import request from 'supertest';
-import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { auctionEngine, app } from '../src/app.js';
 import { createTemporaryHeaderAuth } from '../src/middleware/auth-stub.js';
 import { startMongoReplicaSet } from './helpers/mongo-replset.js';
 
-const now = new Date('2026-10-27T10:00:00.000Z');
+const now = new Date();
 
 describe('API health, bidding adapter, and replica-set test helper', () => {
   let replicaSetUri: string;
@@ -93,14 +93,37 @@ describe('API health, bidding adapter, and replica-set test helper', () => {
       .expect(401);
   });
 
-  it('rejects production startup while the temporary auth stub is enabled', () => {
-    vi.stubEnv('NODE_ENV', 'production');
+  it.each([
+    { label: 'unset', value: undefined },
+    { label: 'production', value: 'production' },
+    { label: 'staging', value: 'staging' },
+  ])('refuses temporary auth when NODE_ENV is $label', ({ value }) => {
+    const previousNodeEnv = process.env.NODE_ENV;
+    if (value === undefined) delete process.env.NODE_ENV;
+    else process.env.NODE_ENV = value;
+
     try {
       expect(() => createTemporaryHeaderAuth()).toThrow(
-        'TEMPORARY header authentication cannot run in production',
+        'TEMPORARY header authentication is allowed only in development or test',
       );
     } finally {
-      vi.unstubAllEnvs();
+      if (previousNodeEnv === undefined) delete process.env.NODE_ENV;
+      else process.env.NODE_ENV = previousNodeEnv;
     }
   });
+
+  it.each(['development', 'test'] as const)(
+    'allows temporary auth when NODE_ENV is %s',
+    (value) => {
+      const previousNodeEnv = process.env.NODE_ENV;
+      process.env.NODE_ENV = value;
+
+      try {
+        expect(() => createTemporaryHeaderAuth()).not.toThrow();
+      } finally {
+        if (previousNodeEnv === undefined) delete process.env.NODE_ENV;
+        else process.env.NODE_ENV = previousNodeEnv;
+      }
+    },
+  );
 });

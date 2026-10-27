@@ -5,10 +5,7 @@ import {
   type Response,
 } from 'express';
 import { z } from 'zod';
-import type {
-  AuctionEngine,
-  PlaceBidInput,
-} from '../../../../packages/auction-engine/src/index.js';
+import type { AuctionEngine, PlaceBidInput } from '@campusbid/auction-engine';
 import type { TemporaryAuthContext } from '../middleware/auth-stub.js';
 
 const objectIdSchema = z.string().regex(/^[\da-f]{24}$/i);

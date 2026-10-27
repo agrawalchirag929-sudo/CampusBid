@@ -6,9 +6,10 @@
     "node": ">=20.19"
   },
   "scripts": {
+    "build": "pnpm --recursive --if-present build",
     "lint": "eslint . && prettier --check .",
-    "typecheck": "pnpm --recursive --if-present typecheck",
-    "test": "pnpm --recursive --workspace-concurrency=1 --if-present test"
+    "typecheck": "pnpm build && pnpm --recursive --if-present typecheck",
+    "test": "pnpm build && pnpm --recursive --workspace-concurrency=1 --if-present test"
   },
   "devDependencies": {
     "@eslint/js": "^9.39.1",

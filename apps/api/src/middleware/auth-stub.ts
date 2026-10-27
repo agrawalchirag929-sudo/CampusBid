@@ -14,8 +14,13 @@ const temporaryHeadersSchema = z.object({
 });
 
 export function createTemporaryHeaderAuth(): RequestHandler {
-  if (process.env.NODE_ENV === 'production') {
-    throw new Error('TEMPORARY header authentication cannot run in production');
+  if (
+    process.env.NODE_ENV !== 'development' &&
+    process.env.NODE_ENV !== 'test'
+  ) {
+    throw new Error(
+      'TEMPORARY header authentication is allowed only in development or test',
+    );
   }
 
   return (request, response, next) => {

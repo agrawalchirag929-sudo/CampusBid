@@ -39,3 +39,17 @@
 - **Consequences:** Queue keys are deleted when idle and after thrown work. The
   queue is currently unbounded; a future change may add a per-auction queue
   limit and typed BUSY rejection.
+
+## 2026-10-27: Compiled workspace package exports
+
+- **Decision:** Build the auction engine as ESM plus declaration files in its
+  dist directory. The API depends on the engine through workspace:* and imports
+  its package exports. Root build runs workspace package builds before
+  typechecking and tests; CI also runs the build explicitly.
+- **Reason:** A compiled package entry point works in both TypeScript checks and
+  Node deployments without reaching into another workspace package's source
+  tree.
+- **Consequences:** Clean installs must run pnpm build before starting the API
+  directly. The root typecheck and test scripts perform that build first. The API
+  uses pnpm's standard workspace link and imports only the compiled package
+  entry point.

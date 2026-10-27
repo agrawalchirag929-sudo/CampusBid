@@ -4,7 +4,7 @@ import pino from 'pino';
 import {
   createAuctionEngine,
   type AuctionEngine,
-} from '../../../packages/auction-engine/src/index.js';
+} from '@campusbid/auction-engine';
 import { createTemporaryHeaderAuth } from './middleware/auth-stub.js';
 import { createBidsRouter } from './routes/bids.js';
 import { healthRouter } from './routes/health.js';
