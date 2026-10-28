@@ -23,7 +23,7 @@ async function main(): Promise<void> {
   const worker = new MailOutboxWorker(
     outbox,
     provider,
-    config.JWT_SECRET,
+    config.MAIL_OUTBOX_KEY,
     logger,
   );
   let stopping = false;

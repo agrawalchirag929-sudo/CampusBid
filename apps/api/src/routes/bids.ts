@@ -54,7 +54,7 @@ export function createBidsRouter(
             response.status(200).json(result);
             return;
           }
-          if (result.code === 'WRONG_COLLEGE') {
+          if (result.code === 'WRONG_COLLEGE' || result.code === 'NOT_FOUND') {
             response.status(404).json({ error: 'Not found' });
             return;
           }

@@ -1,6 +1,7 @@
 import pino from 'pino';
 import mongoose from 'mongoose';
-import { app, config, ensureApiIndexes } from './app.js';
+import { app, auctionEngine, config, ensureApiIndexes } from './app.js';
+import { runAuctionWorker } from './modules/auctions/worker.js';
 
 const logger = pino({
   level: process.env.LOG_LEVEL ?? 'info',
@@ -25,22 +26,33 @@ const server = async (): Promise<void> => {
   const httpServer = app.listen(config.PORT, () => {
     logger.info({ port: config.PORT }, 'CampusBid API listening');
   });
+  let workerStopping = false;
+  const workerTask =
+    config.AUCTION_WORKER_MODE === 'inline'
+      ? runAuctionWorker(auctionEngine, logger, () => workerStopping)
+      : Promise.resolve();
 
   for (const signal of ['SIGINT', 'SIGTERM'] as const) {
     process.on(signal, () => {
+      workerStopping = true;
       httpServer.close((error) => {
         if (error) {
           logger.error({ err: error }, 'API shutdown failed');
           process.exitCode = 1;
           return;
         }
-        void mongoose.disconnect().then(
-          () => logger.info('CampusBid API stopped'),
-          (disconnectError: unknown) => {
-            logger.error({ err: disconnectError }, 'MongoDB disconnect failed');
-            process.exitCode = 1;
-          },
-        );
+        void workerTask
+          .then(() => mongoose.disconnect())
+          .then(
+            () => logger.info('CampusBid API stopped'),
+            (disconnectError: unknown) => {
+              logger.error(
+                { err: disconnectError },
+                'MongoDB disconnect failed',
+              );
+              process.exitCode = 1;
+            },
+          );
       });
     });
   }

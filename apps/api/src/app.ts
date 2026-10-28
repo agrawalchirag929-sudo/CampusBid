@@ -13,6 +13,13 @@ import { AuthService } from './modules/auth/service.js';
 import { createAuthRouter } from './modules/auth/routes.js';
 import { createAuthLimiters } from './modules/auth/rate-limits.js';
 import { createCollegeModel } from './modules/colleges/model.js';
+import { createListingModel } from './modules/listings/model.js';
+import { AuctionsService } from './modules/auctions/service.js';
+import {
+  createAuctionsRouter,
+  createMyAuctionsRouter,
+} from './modules/auctions/routes.js';
+import { createUploadsRouter } from './modules/uploads/routes.js';
 import { createUserModel } from './modules/users/model.js';
 import { UserRepository } from './modules/users/repository.js';
 import { UserService } from './modules/users/service.js';
@@ -78,6 +85,12 @@ export function createApp(options: CreateAppOptions = {}): Express {
     authModels.RefreshToken,
     options.clock,
   );
+  const auctionsService = new AuctionsService(
+    connection,
+    engine,
+    runtimeConfig,
+    options.clock,
+  );
   const authenticate = createAuthenticate(users, runtimeConfig);
   const app = express();
 
@@ -98,6 +111,12 @@ export function createApp(options: CreateAppOptions = {}): Express {
   );
   app.use('/', createUsersRouter(userService, authenticate));
   app.use('/admin', createAdminUsersRouter(userService, authenticate));
+  app.use('/me', createMyAuctionsRouter(auctionsService, authenticate));
+  app.use(
+    '/uploads',
+    createUploadsRouter(runtimeConfig, authenticate, options.clock),
+  );
+  app.use('/auctions', createAuctionsRouter(auctionsService, authenticate));
   app.use('/auctions', createBidsRouter(engine, authenticate));
 
   const errorHandler: ErrorRequestHandler = (
@@ -141,6 +160,7 @@ export async function ensureApiIndexes(): Promise<void> {
     ...Object.values(createAuthModels(mongoose.connection)).map((model) =>
       model.init(),
     ),
+    createListingModel(mongoose.connection).init(),
     auctionEngine.ensureIndexes(),
   ]);
 }

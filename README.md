@@ -20,7 +20,7 @@ The API listens on `PORT` (default `3000`) and exposes `GET /health`.
 
 ## Authentication setup
 
-The API requires a 32 character `JWT_SECRET`, a `COOKIE_NAME`, and a comma
+The API requires separate 32 character `JWT_SECRET` and `MAIL_OUTBOX_KEY` values, a `COOKIE_NAME`, and a comma
 separated `CORS_ORIGINS` allowlist. `COOKIE_DOMAIN` is optional; when unset,
 refresh cookies are host-only. In development, signup and resend-verification
 messages are dispatched from the Mongo-backed outbox by the console mail provider. Run the worker with `pnpm --filter @campusbid/api mail:worker`. Seed the BMSCE college with
@@ -37,6 +37,23 @@ TypeScript declarations to dist before API checks and tests. Bids are accepted
 through one conditional MongoDB update and stored in the same transaction as
 the auction change. The engine also handles bidder-scoped idempotency,
 anti-sniping extensions, scheduled activation, and idempotent closing.
+
+## Listings and auctions
+
+Listings and auctions are scoped to the authenticated user’s college. Sellers
+create both records together; uploads use short-lived signed Cloudinary
+parameters for the college’s fixed folder. Configure `CLOUDINARY_CLOUD_NAME`,
+`CLOUDINARY_API_KEY`, and `CLOUDINARY_API_SECRET` to enable photo signing.
+
+The auction worker polls for scheduled starts and due closes every five seconds.
+Run it separately with `pnpm --filter @campusbid/api auction:worker`, or set
+`AUCTION_WORKER_MODE=inline` to run the same worker in the API process. Multiple
+workers are safe to run together.
+
+For local demos, run `pnpm --filter @campusbid/api auction:seed`. It creates 25
+BMSCE-style listings and verified seller/buyer accounts. Newly generated demo
+passwords are printed once at creation; existing demo account passwords are not
+changed or printed again. The seed refuses to run in production.
 
 ## Build and test
 

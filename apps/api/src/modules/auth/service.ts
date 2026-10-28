@@ -94,7 +94,7 @@ export class AuthService {
     this.RefreshToken = authModels.RefreshToken;
     this.mailOutbox = new MailOutboxRepository(
       options.connection,
-      options.config.JWT_SECRET,
+      options.config.MAIL_OUTBOX_KEY,
     );
     this.clock = options.clock ?? (() => new Date());
     this.key = new TextEncoder().encode(options.config.JWT_SECRET);

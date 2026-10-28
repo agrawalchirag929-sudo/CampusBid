@@ -1,5 +1,5 @@
 import { Types } from 'mongoose';
-import type { Filter } from 'mongodb';
+import type { QueryFilter } from 'mongoose';
 import type { AuthContext } from '@campusbid/shared';
 
 export class ScopedResourceNotFoundError extends Error {
@@ -9,7 +9,7 @@ export class ScopedResourceNotFoundError extends Error {
   }
 }
 
-type FilterFor<T> = Filter<T>;
+type FilterFor<T> = QueryFilter<T>;
 
 export function collegeScopedFilter<T extends { collegeId: Types.ObjectId }>(
   auth: Pick<AuthContext, 'collegeId'>,

@@ -66,3 +66,15 @@ comparison and anti-sniping boundary explicit and makes tests deterministic;
 production API and worker hosts must keep their clocks synchronized. MongoDB
 `$$NOW` is not used because the service also needs one testable clock for
 rejection classification and scheduled worker boundaries.
+
+## Cancellation race
+
+`cancelAuction()` uses one conditional update on the auction document. Its filter
+requires the caller's college and a draft/scheduled status, or an active status
+with no current bid. The same write sets `cancelled` and increments the version.
+A bid uses a conditional update that requires `active`; MongoDB serializes these
+writes on the same document. The bid and cancellation therefore cannot both
+win: if a bid commits first, the no-current-bid condition fails; if cancellation
+commits first, the bid's active-status condition fails. A follow-up scoped read
+is used only to distinguish a missing auction from a present but non-cancellable
+one; it never feeds another update.

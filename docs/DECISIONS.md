@@ -63,16 +63,30 @@
 
 - **Decision:** Refresh cookies are HttpOnly, SameSite=Lax and Secure except in development. COOKIE_DOMAIN is optional, with no default; omission sets a host-only cookie. CORS uses an explicit origin allowlist and TRUST_PROXY is configured from the environment.
 - **Reason:** Same-site cookies reduce cross-site token exposure and work with a frontend/API deployment under one browser site.
-- **Consequences:** A separately hosted frontend should proxy `/api` through its own origin to keep cookies same-site. Cross-college visibility is deliberately unsupported; it may be added later as an opt-in per-listing visibility field. The current auction state machine does not allow draft/scheduled cancellation, so no cancellation endpoint is added.
+- **Consequences:** A separately hosted frontend should proxy `/api` through its own origin to keep cookies same-site. Cross-college visibility is deliberately unsupported; it may be added later as an opt-in per-listing visibility field. Phase 3 permits cancellation from draft, scheduled, or bid-free active auctions; cancellation is a college-scoped conditional update. Cross-college visibility remains deliberately unsupported and may later be added as an opt-in per-listing visibility field.
 
 ## 2026-10-28: Phase 2 security dependencies
 
-- **Decision:** Use @node-rs/argon2 for Argon2id without a native compile step; jose for JWT signing/verification; Helmet for response headers; cors for the origin allowlist; express-rate-limit for per-IP/per-email limits; and cookie-parser to read refresh cookies. Use a ConsoleMailProvider in development and tests; defer Resend to Phase 5. Declare mongodb as a development dependency for its Filter<T> type in the college-scope helper.
+- **Decision:** Use @node-rs/argon2 for Argon2id without a native compile step; jose for JWT signing/verification; Helmet for response headers; cors for the origin allowlist; express-rate-limit for per-IP/per-email limits; and cookie-parser to read refresh cookies. Use a ConsoleMailProvider in development and tests; defer Resend to Phase 5. Use Mongoose QueryFilter<T> in the college-scope helper so scoped filters typecheck directly against Mongoose repositories.
 - **Reason:** These packages provide the required password, token, browser-cookie, and request-protection functions without introducing a mail vendor before its planned phase.
 - **Consequences:** ConsoleMailProvider refuses startup outside development/test. Production mail delivery remains unavailable until the Phase 5 provider is configured.
 
 ## 2026-10-28: Mongo-backed verification mail outbox
 
-- **Decision:** Enqueue verification mail in MongoDB in the same transaction as account and token creation. Encrypt the queued recipient, name and raw verification token with AES-256-GCM using a key derived from JWT_SECRET; clear the encrypted payload after successful delivery. A separate worker claims jobs with an atomic lease, retries failures with capped backoff, and uses the development/test-only console provider.
+- **Decision:** Enqueue verification mail in MongoDB in the same transaction as account and token creation. Encrypt the queued recipient, name and raw verification token with AES-256-GCM using the independent MAIL_OUTBOX_KEY; clear the encrypted payload after successful delivery. A separate worker claims jobs with an atomic lease, retries failures with capped backoff, and uses the development/test-only console provider.
 - **Reason:** Durable queued delivery is required by the project rules, while the verification-token collection must retain only a SHA-256 hash.
-- **Consequences:** Delivery is at least once, so a crash after provider send but before acknowledgement may duplicate mail. Keep JWT_SECRET stable until pending outbox jobs drain; production mail delivery remains unavailable until a production provider is added.
+- **Consequences:** Delivery is at least once, so a crash after provider send but before acknowledgement may duplicate mail. Keep MAIL_OUTBOX_KEY stable until pending outbox jobs drain; rotating the JWT secret does not affect queued mail. Production mail delivery remains unavailable until a production provider is added.
+
+## 2026-10-28: College-scoped listings, auction cancellation, and upload signing
+
+- **Decision:** Store listing photos as Cloudinary URLs/public IDs, and sign uploads with a server-generated fixed `campusbid/<collegeId>` folder, allowed formats, and maximum file size. Keep auction/listing API response contracts in a new shared package module. Search uses a compound text index whose first key is `collegeId`; every authenticated query includes its college.
+- **Reason:** College-scoped index prefixes make search require the same college filter as ordinary reads. Signed folder and file restrictions prevent a client from choosing another folder or weakening upload limits. Shared contracts let clients consume the same response types.
+- **Consequences:** Cloudinary signing is unavailable with a clear 503 until its three environment values are configured. Cross-college visibility is not supported. Cloudinary parameters are signed with Node's built-in crypto, so no SDK dependency is added. The 10 MB value is included in the signed parameters and response; Cloudinary's published direct Upload API does not document `max_file_size` as an enforced upload parameter, so a provider-side size limit must be verified before relying on it as a security boundary.
+
+- **Decision:** Cancel an auction with one conditional update scoped by college. Draft and scheduled auctions may be cancelled; active auctions may be cancelled only while `currentBidId` is null. Seller ownership or same-college ADMIN access is checked in the API service.
+- **Reason:** The condition serializes cancellation against the bid engine's active-auction update. If the bid commits first, cancellation no longer matches; if cancellation wins first, the bid's active-status filter no longer matches.
+- **Consequences:** Cancellation increments auction version once. Competing workers and requests can retry the conditional update, but cannot both win the bid/cancel race.
+
+- **Decision:** Poll auction activation and closing every five seconds in a standalone worker by default, with an opt-in `AUCTION_WORKER_MODE=inline` API mode. Demo seed data is idempotent, refuses production, and generates passwords only when creating the demo accounts.
+- **Reason:** Database state and conditional updates make multiple worker processes and restarts safe; polling discovers due records without relying on in-process timers as the closing mechanism.
+- **Consequences:** Each newly created demo account’s generated password is printed once. A rerun keeps existing passwords unchanged and does not reveal them again.

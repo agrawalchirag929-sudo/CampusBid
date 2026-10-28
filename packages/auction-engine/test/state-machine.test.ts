@@ -11,9 +11,17 @@ describe('auction state machine', () => {
     expect(() => assertAuctionTransition('active', 'ended')).not.toThrow();
     expect(() => assertAuctionTransition('ended', 'unsold')).not.toThrow();
     expect(() => assertAuctionTransition('ended', 'paid')).not.toThrow();
+    expect(() => assertAuctionTransition('draft', 'cancelled')).not.toThrow();
+    expect(() =>
+      assertAuctionTransition('scheduled', 'cancelled'),
+    ).not.toThrow();
+    expect(() => assertAuctionTransition('active', 'cancelled')).not.toThrow();
   });
 
   it('throws a typed error for illegal transitions', () => {
+    expect(() => assertAuctionTransition('paid', 'cancelled')).toThrow(
+      InvalidAuctionTransitionError,
+    );
     expect(() => assertAuctionTransition('draft', 'active')).toThrow(
       InvalidAuctionTransitionError,
     );

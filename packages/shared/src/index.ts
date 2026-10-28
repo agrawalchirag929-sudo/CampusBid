@@ -45,3 +45,4 @@ export type SignupInput = z.infer<typeof signupSchema>;
 export type LoginInput = z.infer<typeof loginSchema>;
 export type VerifyEmailInput = z.infer<typeof verifyEmailSchema>;
 export type ResendVerificationInput = z.infer<typeof resendVerificationSchema>;
+export * from './auctions.js';

@@ -1,9 +1,9 @@
 import type { AuctionStatus } from './types.js';
 
 const ALLOWED_TRANSITIONS: Record<AuctionStatus, readonly AuctionStatus[]> = {
-  draft: ['scheduled'],
-  scheduled: ['active'],
-  active: ['ended'],
+  draft: ['scheduled', 'cancelled'],
+  scheduled: ['active', 'cancelled'],
+  active: ['ended', 'cancelled'],
   ended: ['paid', 'unsold', 'cancelled'],
   paid: [],
   unsold: [],

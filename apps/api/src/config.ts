@@ -16,6 +16,7 @@ const envSchema = z.object({
   MONGO_URI: z.string().min(1).optional(),
   PORT: z.coerce.number().int().min(1).max(65535).default(3000),
   JWT_SECRET: z.string().min(32),
+  MAIL_OUTBOX_KEY: z.string().min(32),
   COOKIE_NAME: z.string().trim().min(1),
   COOKIE_DOMAIN: z.string().trim().min(1).optional(),
   CORS_ORIGINS: z
@@ -41,6 +42,10 @@ const envSchema = z.object({
       'CORS_ORIGINS must be a comma-separated list of HTTP(S) origins',
     ),
   TRUST_PROXY: trustProxySchema,
+  CLOUDINARY_CLOUD_NAME: z.string().trim().min(1).optional(),
+  CLOUDINARY_API_KEY: z.string().trim().min(1).optional(),
+  CLOUDINARY_API_SECRET: z.string().min(1).optional(),
+  AUCTION_WORKER_MODE: z.enum(['off', 'inline']).default('off'),
 });
 
 export type AppConfig = z.infer<typeof envSchema>;

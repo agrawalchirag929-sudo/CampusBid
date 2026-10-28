@@ -102,6 +102,7 @@ export type PlaceBidCode =
   | 'TOO_LOW'
   | 'ENDED'
   | 'NOT_ACTIVE'
+  | 'NOT_FOUND'
   | 'SELF_BID'
   | 'WRONG_COLLEGE'
   | 'IDEMPOTENCY_CONFLICT';
@@ -120,3 +121,14 @@ export interface PlaceBidSuccess {
 }
 
 export type PlaceBidResult = PlaceBidSuccess | PlaceBidFailure;
+
+export interface CancelAuctionInput {
+  auctionId: string;
+  collegeId: string;
+}
+
+export type CancelAuctionCode = 'NOT_FOUND' | 'NOT_CANCELLABLE';
+
+export type CancelAuctionResult =
+  | { ok: true; auction: AuctionSnapshot }
+  | { ok: false; code: CancelAuctionCode };

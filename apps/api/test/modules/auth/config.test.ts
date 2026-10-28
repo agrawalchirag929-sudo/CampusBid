@@ -6,6 +6,7 @@ import { ConsoleMailProvider } from '../../../src/modules/auth/mail-provider.js'
 const validEnvironment: NodeJS.ProcessEnv = {
   NODE_ENV: 'test',
   JWT_SECRET: 'at-least-32-character-test-secret-value',
+  MAIL_OUTBOX_KEY: 'at-least-32-character-mail-outbox-key',
   COOKIE_NAME: 'campusbid_refresh',
   CORS_ORIGINS: 'http://localhost:5173',
 };
@@ -15,10 +16,13 @@ describe('API security configuration', () => {
     expect(loadConfig(validEnvironment).COOKIE_DOMAIN).toBeUndefined();
   });
 
-  it('requires a strong JWT secret, cookie name, environment, and CORS allowlist', () => {
+  it('requires strong JWT and mail outbox keys, cookie name, environment, and CORS allowlist', () => {
     expect(() =>
       loadConfig({ ...validEnvironment, JWT_SECRET: 'short' }),
     ).toThrow(/JWT_SECRET/);
+    expect(() =>
+      loadConfig({ ...validEnvironment, MAIL_OUTBOX_KEY: 'short' }),
+    ).toThrow(/MAIL_OUTBOX_KEY/);
     expect(() =>
       loadConfig({ ...validEnvironment, COOKIE_NAME: undefined }),
     ).toThrow(/COOKIE_NAME/);

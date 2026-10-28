@@ -93,6 +93,7 @@ async function assert500BidInvariants(
     'TOO_LOW',
     'ENDED',
     'NOT_ACTIVE',
+    'NOT_FOUND',
     'SELF_BID',
     'WRONG_COLLEGE',
     'IDEMPOTENCY_CONFLICT',
@@ -239,6 +240,96 @@ describe('transactional auction engine', () => {
     const inactive = await engine.placeBid(makeBid(inactiveAuctionId));
     expect(inactive).toMatchObject({ ok: false, code: 'NOT_ACTIVE' });
   });
+
+  it('returns a distinct NOT_FOUND result for a missing auction', async () => {
+    const missing = await engine.placeBid(
+      makeBid(new Types.ObjectId(), { amountPaise: 10_000 }),
+    );
+    expect(missing).toMatchObject({ ok: false, code: 'NOT_FOUND' });
+  });
+
+  it('cancels only unbid auctions and atomically races cancellation against a bid', async () => {
+    const draftId = await seedAuction({ status: 'draft' });
+    await expect(
+      engine.cancelAuction({
+        auctionId: draftId.toString(),
+        collegeId: collegeId.toString(),
+      }),
+    ).resolves.toMatchObject({
+      ok: true,
+      auction: { status: 'cancelled', version: 1 },
+    });
+
+    const scheduledId = await seedAuction({ status: 'scheduled' });
+    await expect(
+      engine.cancelAuction({
+        auctionId: scheduledId.toString(),
+        collegeId: collegeId.toString(),
+      }),
+    ).resolves.toMatchObject({ ok: true, auction: { status: 'cancelled' } });
+
+    const activeWithoutBidId = await seedAuction();
+    await expect(
+      engine.cancelAuction({
+        auctionId: activeWithoutBidId.toString(),
+        collegeId: collegeId.toString(),
+      }),
+    ).resolves.toMatchObject({ ok: true, auction: { status: 'cancelled' } });
+
+    const activeWithBidId = await seedAuction();
+    const activeBid = await engine.placeBid(
+      makeBid(activeWithBidId, { amountPaise: 10_000 }),
+    );
+    expect(activeBid.ok).toBe(true);
+    await expect(
+      engine.cancelAuction({
+        auctionId: activeWithBidId.toString(),
+        collegeId: collegeId.toString(),
+      }),
+    ).resolves.toMatchObject({ ok: false, code: 'NOT_CANCELLABLE' });
+
+    const racedId = await seedAuction();
+    const [bidSettled, cancelSettled] = await Promise.allSettled([
+      engine.placeBid(
+        makeBid(racedId, { amountPaise: 10_000, idemKey: 'cancel-race-bid' }),
+      ),
+      engine.cancelAuction({
+        auctionId: racedId.toString(),
+        collegeId: collegeId.toString(),
+      }),
+    ]);
+    expect(bidSettled.status).toBe('fulfilled');
+    expect(cancelSettled.status).toBe('fulfilled');
+    if (
+      bidSettled.status !== 'fulfilled' ||
+      cancelSettled.status !== 'fulfilled'
+    ) {
+      throw new Error('Race operation unexpectedly threw');
+    }
+    const bidWon = bidSettled.value.ok;
+    const cancelWon = cancelSettled.value.ok;
+    expect(Number(bidWon) + Number(cancelWon)).toBe(1);
+    const persisted = await engine.models.Auction.findById(racedId)
+      .lean()
+      .exec();
+    if (!persisted) throw new Error('Raced auction fixture disappeared');
+    if (bidWon) {
+      expect(persisted.status).toBe('active');
+      expect(
+        await engine.models.Bid.countDocuments({ auctionId: racedId }),
+      ).toBe(1);
+      expect(cancelSettled.value).toMatchObject({
+        ok: false,
+        code: 'NOT_CANCELLABLE',
+      });
+    } else {
+      expect(persisted.status).toBe('cancelled');
+      expect(
+        await engine.models.Bid.countDocuments({ auctionId: racedId }),
+      ).toBe(0);
+      expect(bidSettled.value).toMatchObject({ ok: false, code: 'NOT_ACTIVE' });
+    }
+  }, 60_000);
 
   it('serializes 500 parallel distinct and duplicate price bids without lost updates', async () => {
     const auctionId = await seedAuction();

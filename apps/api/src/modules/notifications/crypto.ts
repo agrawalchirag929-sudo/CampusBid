@@ -16,11 +16,11 @@ const payloadSchema = z
 
 export type VerificationEmailPayload = z.infer<typeof payloadSchema>;
 
-function encryptionKey(secret: string): Buffer {
+function encryptionKey(outboxKey: string): Buffer {
   return Buffer.from(
     hkdfSync(
       'sha256',
-      Buffer.from(secret, 'utf8'),
+      Buffer.from(outboxKey, 'utf8'),
       Buffer.from('campusbid-mail-outbox-v1', 'utf8'),
       Buffer.from('verification-email', 'utf8'),
       32,
@@ -30,10 +30,10 @@ function encryptionKey(secret: string): Buffer {
 
 export function encryptVerificationEmail(
   payload: VerificationEmailPayload,
-  secret: string,
+  outboxKey: string,
 ): string {
   const nonce = randomBytes(12);
-  const cipher = createCipheriv('aes-256-gcm', encryptionKey(secret), nonce);
+  const cipher = createCipheriv('aes-256-gcm', encryptionKey(outboxKey), nonce);
   const ciphertext = Buffer.concat([
     cipher.update(JSON.stringify(payload), 'utf8'),
     cipher.final(),
@@ -47,7 +47,7 @@ export function encryptVerificationEmail(
 
 export function decryptVerificationEmail(
   encryptedPayload: string,
-  secret: string,
+  outboxKey: string,
 ): VerificationEmailPayload {
   const [nonceText, tagText, ciphertextText, extra] =
     encryptedPayload.split('.');
@@ -56,7 +56,7 @@ export function decryptVerificationEmail(
   }
   const decipher = createDecipheriv(
     'aes-256-gcm',
-    encryptionKey(secret),
+    encryptionKey(outboxKey),
     Buffer.from(nonceText, 'base64url'),
   );
   decipher.setAuthTag(Buffer.from(tagText, 'base64url'));

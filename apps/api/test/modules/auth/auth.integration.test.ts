@@ -45,7 +45,7 @@ const { Auction } = createAuctionModels(mongoose.connection);
 const mailWorker = new MailOutboxWorker(
   MailOutbox,
   mail,
-  process.env.JWT_SECRET ?? '',
+  process.env.MAIL_OUTBOX_KEY ?? '',
   { error: () => undefined },
 );
 const api = createApp({ clock: () => new Date(clockNow) });
@@ -248,7 +248,7 @@ describe('authentication and college-scoped API', () => {
             throw new Error('temporary provider failure');
         },
       },
-      process.env.JWT_SECRET ?? '',
+      process.env.MAIL_OUTBOX_KEY ?? '',
       { error: (_fields, message) => workerErrors.push(message) },
       () => new Date(now),
     );

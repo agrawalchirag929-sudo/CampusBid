@@ -29,6 +29,8 @@ import type {
   PlaceBidInput,
   PlaceBidResult,
   PlaceBidSuccess,
+  CancelAuctionInput,
+  CancelAuctionResult,
   StoredAuctionSnapshot,
 } from './types.js';
 
@@ -59,6 +61,7 @@ export interface AuctionEngine {
   readonly models: ReturnType<typeof createAuctionModels>;
   ensureIndexes(): Promise<void>;
   placeBid(input: PlaceBidInput): Promise<PlaceBidResult>;
+  cancelAuction(input: CancelAuctionInput): Promise<CancelAuctionResult>;
   activateDueAuctions(
     now?: Date,
     batchSize?: number,
@@ -257,7 +260,7 @@ function resultCodeForAuction(
   now: Date,
 ): PlaceBidFailure | null {
   if (!auction) {
-    return { ok: false, code: 'NOT_ACTIVE', currentPricePaise: 0, version: 0 };
+    return { ok: false, code: 'NOT_FOUND', currentPricePaise: 0, version: 0 };
   }
 
   let code: PlaceBidFailure['code'] | undefined;
@@ -358,7 +361,7 @@ export function createAuctionEngine(
   }
 
   function logTransientRetry(
-    operation: 'placeBid' | 'closeAuction',
+    operation: 'placeBid' | 'closeAuction' | 'cancelAuction',
     auctionId: string,
     attempt: number,
     retryCount: number,
@@ -708,12 +711,77 @@ export function createAuctionEngine(
     return closed;
   }
 
+  async function cancelAuction(
+    input: CancelAuctionInput,
+  ): Promise<CancelAuctionResult> {
+    if (
+      !/^[\da-f]{24}$/i.test(input.auctionId) ||
+      !/^[\da-f]{24}$/i.test(input.collegeId)
+    ) {
+      throw new AuctionEngineInputError(
+        'auctionId and collegeId must be ObjectIds',
+      );
+    }
+
+    assertAuctionTransition('draft', 'cancelled');
+    assertAuctionTransition('scheduled', 'cancelled');
+    assertAuctionTransition('active', 'cancelled');
+
+    const auctionId = new Types.ObjectId(input.auctionId);
+    const collegeId = new Types.ObjectId(input.collegeId);
+    let auction: AuctionRecord | null = null;
+    let retryCount = 0;
+    for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+      try {
+        auction = await Auction.findOneAndUpdate(
+          {
+            _id: auctionId,
+            collegeId,
+            $or: [
+              { status: { $in: ['draft', 'scheduled'] } },
+              { status: 'active', currentBidId: null },
+            ],
+          },
+          { $set: { status: 'cancelled' }, $inc: { version: 1 } },
+          { returnDocument: 'after' },
+        )
+          .lean()
+          .exec();
+        break;
+      } catch (error) {
+        if (!isTransientTransactionError(error) || attempt === maxAttempts) {
+          throw error;
+        }
+        retryCount += 1;
+        logTransientRetry(
+          'cancelAuction',
+          input.auctionId,
+          attempt,
+          retryCount,
+          error,
+        );
+        await randomBackoff(attempt, baseBackoffMs, maxBackoffMs);
+      }
+    }
+
+    if (auction) return { ok: true, auction: toAuctionSnapshot(auction) };
+
+    const scopedAuction = await Auction.findOne({ _id: auctionId, collegeId })
+      .select({ _id: 1 })
+      .lean()
+      .exec();
+    return scopedAuction
+      ? { ok: false, code: 'NOT_CANCELLABLE' }
+      : { ok: false, code: 'NOT_FOUND' };
+  }
+
   return {
     models: { Auction, Bid },
     ensureIndexes: async () => {
       await Promise.all([Auction.init(), Bid.init()]);
     },
     placeBid,
+    cancelAuction,
     activateDueAuctions,
     closeDueAuctions,
   };
