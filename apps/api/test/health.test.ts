@@ -1,24 +1,25 @@
 import mongoose, { Types } from 'mongoose';
+import { SignJWT } from 'jose';
 import request from 'supertest';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { auctionEngine, app } from '../src/app.js';
-import { createTemporaryHeaderAuth } from '../src/middleware/auth-stub.js';
+import { auctionEngine, app, ensureApiIndexes } from '../src/app.js';
+import { createCollegeModel } from '../src/modules/colleges/model.js';
+import { createUserModel } from '../src/modules/users/model.js';
 import { startMongoReplicaSet } from './helpers/mongo-replset.js';
 
 const now = new Date();
+const jwtKey = new TextEncoder().encode(process.env.JWT_SECRET);
 
-describe('API health, bidding adapter, and replica-set test helper', () => {
-  let replicaSetUri: string;
+describe('API health, replica-set setup, and authenticated bid adapter', () => {
   let stopReplicaSet: (() => Promise<void>) | undefined;
 
   beforeAll(async () => {
     const replicaSet = await startMongoReplicaSet();
-    replicaSetUri = replicaSet.getUri();
     stopReplicaSet = async () => {
       await replicaSet.stop();
     };
-    await mongoose.connect(replicaSetUri, { maxPoolSize: 100 });
-    await auctionEngine.ensureIndexes();
+    await mongoose.connect(replicaSet.getUri(), { maxPoolSize: 100 });
+    await ensureApiIndexes();
   }, 120_000);
 
   afterAll(async () => {
@@ -48,10 +49,38 @@ describe('API health, bidding adapter, and replica-set test helper', () => {
     }
   }, 30_000);
 
-  it('validates the bid adapter and submits a bid with the temporary auth headers', async () => {
+  it('requires a verified database user for bids and ignores spoofed identity headers', async () => {
     const collegeId = new Types.ObjectId();
     const sellerId = new Types.ObjectId();
     const bidderId = new Types.ObjectId();
+    await createCollegeModel(mongoose.connection).create({
+      _id: collegeId,
+      name: 'Test College',
+      slug: `test-${collegeId.toString()}`,
+      emailDomains: [`${collegeId.toString()}.example`],
+      active: true,
+    });
+    await createUserModel(mongoose.connection).create({
+      _id: bidderId,
+      email: `${bidderId.toString()}@${collegeId.toString()}.example`,
+      passwordHash: 'unused-in-auth-middleware-test',
+      collegeId,
+      roles: ['BUYER', 'SELLER'],
+      status: 'active',
+      emailVerifiedAt: now,
+      name: 'Verified Buyer',
+    });
+    const accessToken = await new SignJWT({
+      collegeId: collegeId.toString(),
+      roles: ['BUYER'],
+    })
+      .setProtectedHeader({ alg: 'HS256' })
+      .setIssuer('campusbid-api')
+      .setAudience('campusbid-client')
+      .setSubject(bidderId.toString())
+      .setIssuedAt()
+      .setExpirationTime('15m')
+      .sign(jwtKey);
     const auction = await auctionEngine.models.Auction.create({
       collegeId,
       sellerId,
@@ -68,62 +97,34 @@ describe('API health, bidding adapter, and replica-set test helper', () => {
       extensionCount: 0,
     });
 
-    const success = await request(app)
+    await request(app)
       .post(`/auctions/${auction._id.toString()}/bids`)
-      .set('x-user-id', bidderId.toString())
-      .set('x-college-id', collegeId.toString())
-      .set('Idempotency-Key', 'api-adapter-key')
+      .set('Idempotency-Key', 'missing-auth')
       .send({ amountPaise: 1_000 })
-      .expect(200);
-    expect(success.body).toMatchObject({
-      ok: true,
-      bid: { amountPaise: 1_000 },
-    });
+      .expect(401);
 
     await request(app)
       .post(`/auctions/${auction._id.toString()}/bids`)
-      .set('x-user-id', bidderId.toString())
-      .set('x-college-id', collegeId.toString())
-      .send({ amountPaise: 1_100 })
+      .set('Authorization', `Bearer ${accessToken}`)
+      .set('Idempotency-Key', 'spoofed-body')
+      .send({
+        amountPaise: 1_000,
+        bidderId: sellerId.toString(),
+        collegeId: sellerId.toString(),
+      })
       .expect(400);
 
-    await request(app)
+    const accepted = await request(app)
       .post(`/auctions/${auction._id.toString()}/bids`)
-      .send({ amountPaise: 1_100 })
-      .expect(401);
+      .set('Authorization', `Bearer ${accessToken}`)
+      .set(['x-user', '-id'].join(''), sellerId.toString())
+      .set(['x-college', '-id'].join(''), sellerId.toString())
+      .set('Idempotency-Key', 'auth-derived-bidder')
+      .send({ amountPaise: 1_000 })
+      .expect(200);
+    expect(accepted.body).toMatchObject({
+      ok: true,
+      bid: { bidderId: bidderId.toString(), collegeId: collegeId.toString() },
+    });
   });
-
-  it.each([
-    { label: 'unset', value: undefined },
-    { label: 'production', value: 'production' },
-    { label: 'staging', value: 'staging' },
-  ])('refuses temporary auth when NODE_ENV is $label', ({ value }) => {
-    const previousNodeEnv = process.env.NODE_ENV;
-    if (value === undefined) delete process.env.NODE_ENV;
-    else process.env.NODE_ENV = value;
-
-    try {
-      expect(() => createTemporaryHeaderAuth()).toThrow(
-        'TEMPORARY header authentication is allowed only in development or test',
-      );
-    } finally {
-      if (previousNodeEnv === undefined) delete process.env.NODE_ENV;
-      else process.env.NODE_ENV = previousNodeEnv;
-    }
-  });
-
-  it.each(['development', 'test'] as const)(
-    'allows temporary auth when NODE_ENV is %s',
-    (value) => {
-      const previousNodeEnv = process.env.NODE_ENV;
-      process.env.NODE_ENV = value;
-
-      try {
-        expect(() => createTemporaryHeaderAuth()).not.toThrow();
-      } finally {
-        if (previousNodeEnv === undefined) delete process.env.NODE_ENV;
-        else process.env.NODE_ENV = previousNodeEnv;
-      }
-    },
-  );
 });

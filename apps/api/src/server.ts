@@ -1,23 +1,29 @@
 import pino from 'pino';
 import mongoose from 'mongoose';
-import { app, auctionEngine } from './app.js';
+import { app, config, ensureApiIndexes } from './app.js';
 
-const logger = pino({ level: process.env.LOG_LEVEL ?? 'info' });
-const port = Number(process.env.PORT ?? 3000);
-const mongoUri = process.env.MONGO_URI;
+const logger = pino({
+  level: process.env.LOG_LEVEL ?? 'info',
+  redact: {
+    paths: [
+      'req.headers.authorization',
+      'req.headers.cookie',
+      'req.body.password',
+      'passwordHash',
+      'refreshToken',
+      'token',
+    ],
+    censor: '[Redacted]',
+  },
+});
 
-if (!Number.isInteger(port) || port < 1 || port > 65535) {
-  throw new Error('PORT must be an integer between 1 and 65535');
-}
-if (!mongoUri) {
-  throw new Error('MONGO_URI is required');
-}
+if (!config.MONGO_URI) throw new Error('MONGO_URI is required');
 
 const server = async (): Promise<void> => {
-  await mongoose.connect(mongoUri, { maxPoolSize: 100 });
-  await auctionEngine.ensureIndexes();
-  const httpServer = app.listen(port, () => {
-    logger.info({ port }, 'CampusBid API listening');
+  await mongoose.connect(config.MONGO_URI as string, { maxPoolSize: 100 });
+  await ensureApiIndexes();
+  const httpServer = app.listen(config.PORT, () => {
+    logger.info({ port: config.PORT }, 'CampusBid API listening');
   });
 
   for (const signal of ['SIGINT', 'SIGTERM'] as const) {

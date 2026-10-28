@@ -18,6 +18,17 @@ pnpm --filter @campusbid/api dev
 
 The API listens on `PORT` (default `3000`) and exposes `GET /health`.
 
+## Authentication setup
+
+The API requires a 32 character `JWT_SECRET`, a `COOKIE_NAME`, and a comma
+separated `CORS_ORIGINS` allowlist. `COOKIE_DOMAIN` is optional; when unset,
+refresh cookies are host-only. In development, signup and resend-verification
+messages are dispatched from the Mongo-backed outbox by the console mail provider. Run the worker with `pnpm --filter @campusbid/api mail:worker`. Seed the BMSCE college with
+`pnpm --filter @campusbid/api college:seed`, then grant an administrator from
+the CLI with `pnpm --filter @campusbid/api admin:grant <email>`. Admin grants
+require an existing verified account. See [docs/AUTH.md](docs/AUTH.md) for the
+token lifecycle and current security boundaries.
+
 ## Bid engine
 
 The reusable engine lives in the auction-engine workspace package. The API
@@ -36,14 +47,6 @@ transaction behavior is exercised without a standalone MongoDB server.
 ```sh
 pnpm install --frozen-lockfile
 pnpm build
-pnpm lint
-pnpm typecheck
-pnpm test
-```
-
-## Checks
-
-```sh
 pnpm lint
 pnpm typecheck
 pnpm test

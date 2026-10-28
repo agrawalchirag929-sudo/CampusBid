@@ -20,8 +20,7 @@
   the bid record keeps the original auction snapshot for idempotent retries.
 - **Consequences:** Production and integration tests require a MongoDB replica
   set. Bid transactions retry transient conflicts at most thirty-two times with
-  capped exponential full jitter. API authentication remains a non-production header stub until
-  Phase 2. All workspace package manifests require Node.js 20.19 or newer for
+  capped exponential full jitter. Phase 2 replaces the temporary development/test header stub with database-backed authentication. All workspace package manifests require Node.js 20.19 or newer for
   the Mongoose 9 runtime baseline; CI runs on Node.js 22.
 
 ## 2026-10-27: Per-process bid queue and contention handling
@@ -53,3 +52,27 @@
   directly. The root typecheck and test scripts perform that build first. The API
   uses pnpm's standard workspace link and imports only the compiled package
   entry point.
+
+## 2026-10-28: Authentication, college scoping, and refresh rotation
+
+- **Decision:** Store colleges, users, email-verification tokens, and refresh-token families in MongoDB. Normalize emails/domains, enforce unique indexes, and assign BUYER/SELLER only after email verification. ADMIN is granted through a CLI command only. Authenticate HS256 JWTs for 15 minutes and reload the active, verified user from MongoDB on every request.
+- **Reason:** Database-backed roles and status make bans and role changes effective immediately. Exact domain matching and unique email/domain indexes make college assignment deterministic. Passwords use Argon2id. Auth token collections retain only SHA-256 hashes; pending verification mail payloads are encrypted separately in the outbox.
+- **Consequences:** Authentication bootstrap lookups by email or token hash cannot begin with an authenticated college; after resolving the account/token, follow-up operations use its stored college ID. Authenticated user/admin/resource queries must use the college-scope helper. Refresh rotation atomically consumes a token and inserts its successor in one transaction. Reuse within ten seconds returns 401 without family revocation; later reuse revokes the family. Rotated tokens remain until expiry for replay detection.
+
+## 2026-10-28: Same-site refresh cookie and cross-college visibility
+
+- **Decision:** Refresh cookies are HttpOnly, SameSite=Lax and Secure except in development. COOKIE_DOMAIN is optional, with no default; omission sets a host-only cookie. CORS uses an explicit origin allowlist and TRUST_PROXY is configured from the environment.
+- **Reason:** Same-site cookies reduce cross-site token exposure and work with a frontend/API deployment under one browser site.
+- **Consequences:** A separately hosted frontend should proxy `/api` through its own origin to keep cookies same-site. Cross-college visibility is deliberately unsupported; it may be added later as an opt-in per-listing visibility field. The current auction state machine does not allow draft/scheduled cancellation, so no cancellation endpoint is added.
+
+## 2026-10-28: Phase 2 security dependencies
+
+- **Decision:** Use @node-rs/argon2 for Argon2id without a native compile step; jose for JWT signing/verification; Helmet for response headers; cors for the origin allowlist; express-rate-limit for per-IP/per-email limits; and cookie-parser to read refresh cookies. Use a ConsoleMailProvider in development and tests; defer Resend to Phase 5. Declare mongodb as a development dependency for its Filter<T> type in the college-scope helper.
+- **Reason:** These packages provide the required password, token, browser-cookie, and request-protection functions without introducing a mail vendor before its planned phase.
+- **Consequences:** ConsoleMailProvider refuses startup outside development/test. Production mail delivery remains unavailable until the Phase 5 provider is configured.
+
+## 2026-10-28: Mongo-backed verification mail outbox
+
+- **Decision:** Enqueue verification mail in MongoDB in the same transaction as account and token creation. Encrypt the queued recipient, name and raw verification token with AES-256-GCM using a key derived from JWT_SECRET; clear the encrypted payload after successful delivery. A separate worker claims jobs with an atomic lease, retries failures with capped backoff, and uses the development/test-only console provider.
+- **Reason:** Durable queued delivery is required by the project rules, while the verification-token collection must retain only a SHA-256 hash.
+- **Consequences:** Delivery is at least once, so a crash after provider send but before acknowledgement may duplicate mail. Keep JWT_SECRET stable until pending outbox jobs drain; production mail delivery remains unavailable until a production provider is added.

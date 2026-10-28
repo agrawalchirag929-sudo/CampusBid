@@ -7,14 +7,24 @@
     "build": "tsc -p tsconfig.build.json",
     "dev": "node --env-file=../../.env --import tsx --watch src/server.ts",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run"
+    "test": "vitest run",
+    "college:seed": "node --env-file=../../.env --import tsx src/modules/colleges/scripts/seed-bmsce.ts",
+    "admin:grant": "node --env-file=../../.env --import tsx src/modules/users/scripts/grant-admin.ts",
+    "mail:worker": "node --env-file=../../.env --import tsx src/modules/notifications/scripts/worker.ts"
   },
   "dependencies": {
     "express": "^5.1.0",
     "mongoose": "^9.0.0",
     "pino": "^9.14.0",
     "zod": "^4.1.12",
-    "@campusbid/auction-engine": "workspace:*"
+    "@campusbid/auction-engine": "workspace:*",
+    "@campusbid/shared": "workspace:*",
+    "@node-rs/argon2": "^2.0.2",
+    "cookie-parser": "^1.4.7",
+    "cors": "^2.8.5",
+    "express-rate-limit": "^8.1.0",
+    "helmet": "^8.1.0",
+    "jose": "^6.1.0"
   },
   "devDependencies": {
     "@types/express": "^5.0.5",
@@ -22,7 +32,10 @@
     "mongodb-memory-server": "^10.2.3",
     "supertest": "^7.1.4",
     "tsx": "^4.20.6",
-    "vitest": "^3.2.4"
+    "vitest": "^3.2.4",
+    "@types/cookie-parser": "^1.4.9",
+    "@types/cors": "^2.8.19",
+    "mongodb": "^7.7.0"
   },
   "engines": {
     "node": ">=20.19"
