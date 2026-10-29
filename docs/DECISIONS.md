@@ -90,3 +90,9 @@
 - **Decision:** Poll auction activation and closing every five seconds in a standalone worker by default, with an opt-in `AUCTION_WORKER_MODE=inline` API mode. Demo seed data is idempotent, refuses production, and generates passwords only when creating the demo accounts.
 - **Reason:** Database state and conditional updates make multiple worker processes and restarts safe; polling discovers due records without relying on in-process timers as the closing mechanism.
 - **Consequences:** Each newly created demo account’s generated password is printed once. A rerun keeps existing passwords unchanged and does not reveal them again.
+
+## 2026-10-29: Web auth session and same-origin API routing
+
+- **Decision:** Keep the short-lived access token in memory only. Restore a session with one shared refresh request on app startup, send the httpOnly refresh cookie with same-origin `/api` calls, and share concurrent 401 refreshes. Vite strips `/api` before forwarding to the local API. For Vercel, use its build-time `vercel.ts` configuration with `BACKEND_URL` and a normal rewrite; a build script cannot generate a `vercel.json` that Vercel has already read, and Vercel accepts only one config file.
+- **Reason:** Same-origin requests preserve the host-only SameSite=Lax refresh cookie, while in-memory access tokens avoid persistent browser storage. The supported programmatic config supplies the deployment-specific backend origin without a serverless proxy.
+- **Consequences:** Verification links remove their single-use token from the address bar before posting it, and request deduplication protects React StrictMode replays. Socket.IO will connect directly to the backend using `VITE_SOCKET_URL` and pass the current access token in the handshake `auth` payload; Vercel HTTP rewrites do not proxy WebSocket upgrades.

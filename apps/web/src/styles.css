@@ -1,0 +1,110 @@
+@import 'tailwindcss';
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+@theme {
+  --color-ink: #17352f;
+  --color-moss: #28594c;
+  --color-clay: #a44731;
+  --color-saffron: #d4a548;
+  --color-paper: #f4efe3;
+  --color-card: #fffdf8;
+  --font-display: Georgia, 'Times New Roman', serif;
+  --font-sans: 'Trebuchet MS', Arial, sans-serif;
+}
+
+:root {
+  font-family: var(--font-sans);
+  color: #17352f;
+  background: #f4efe3;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+}
+
+:root.dark {
+  color: #ece8dc;
+  background: #14231f;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  min-width: 320px;
+  min-height: 100vh;
+  margin: 0;
+}
+
+button,
+input {
+  font: inherit;
+}
+
+button:focus-visible,
+a:focus-visible,
+input:focus-visible {
+  outline: 3px solid #d4a548;
+  outline-offset: 3px;
+}
+
+.site-grid {
+  background-image:
+    linear-gradient(rgba(40, 89, 76, 0.035) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(40, 89, 76, 0.035) 1px, transparent 1px);
+  background-size: 32px 32px;
+}
+
+.dark .site-grid {
+  background-image:
+    linear-gradient(rgba(238, 232, 220, 0.035) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(238, 232, 220, 0.035) 1px, transparent 1px);
+}
+
+.campus-card {
+  background: #fffdf8;
+  border: 1px solid rgba(23, 53, 47, 0.14);
+  box-shadow: 0 18px 55px rgba(23, 53, 47, 0.09);
+}
+
+.dark .campus-card {
+  background: #1d302a;
+  border-color: rgba(238, 232, 220, 0.14);
+  box-shadow: 0 18px 55px rgba(0, 0, 0, 0.18);
+}
+
+.paper-rule {
+  background: repeating-linear-gradient(
+    90deg,
+    #a44731 0 18px,
+    transparent 18px 24px,
+    #d4a548 24px 30px,
+    transparent 30px 36px
+  );
+}
+
+.dark .paper-rule {
+  opacity: 0.8;
+}
+
+.form-input {
+  width: 100%;
+  border: 1px solid rgba(23, 53, 47, 0.25);
+  border-radius: 0.75rem;
+  background: rgba(255, 255, 255, 0.65);
+  padding: 0.8rem 0.9rem;
+  color: inherit;
+}
+
+.dark .form-input {
+  border-color: rgba(238, 232, 220, 0.22);
+  background: rgba(7, 17, 14, 0.35);
+}
+
+.form-input::placeholder {
+  color: #75837c;
+}
+
+.dark .form-input::placeholder {
+  color: #98a69f;
+}
