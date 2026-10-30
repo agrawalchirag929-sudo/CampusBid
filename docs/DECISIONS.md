@@ -96,3 +96,24 @@
 - **Decision:** Keep the short-lived access token in memory only. Restore a session with one shared refresh request on app startup, send the httpOnly refresh cookie with same-origin `/api` calls, and share concurrent 401 refreshes. Vite strips `/api` before forwarding to the local API. For Vercel, use its build-time `vercel.ts` configuration with `BACKEND_URL` and a normal rewrite; a build script cannot generate a `vercel.json` that Vercel has already read, and Vercel accepts only one config file.
 - **Reason:** Same-origin requests preserve the host-only SameSite=Lax refresh cookie, while in-memory access tokens avoid persistent browser storage. The supported programmatic config supplies the deployment-specific backend origin without a serverless proxy.
 - **Consequences:** Verification links remove their single-use token from the address bar before posting it, and request deduplication protects React StrictMode replays. Socket.IO will connect directly to the backend using `VITE_SOCKET_URL` and pass the current access token in the handshake `auth` payload; Vercel HTTP rewrites do not proxy WebSocket upgrades.
+
+## 2026-10-30: MongoDB-backed Socket.IO realtime events
+
+- **Decision:** Use one filtered MongoDB database change stream per API process.
+  Build bid events from bid insert documents and auction status events from
+  `updateDescription`; do not emit from HTTP routes or use pre/post images,
+  update lookup, or a shared Socket.IO adapter. Each process publishes only to
+  its local sockets. Reconnect replay uses persisted bid snapshots and falls
+  back to a full college-scoped state snapshot when versions cannot be
+  reconstructed.
+- **Reason:** The bid insert is committed in the same transaction as its auction
+  snapshot, while status fields are available in the update description. This
+  includes worker activation and closing. Filtering at MongoDB limits stream
+  traffic to the state changes clients need.
+- **Consequences:** Restarting a stream sends `auction.resync` to joined rooms;
+  clients replay from their last seen version. Viewer counts are per-instance
+  and approximate in a multi-process deployment. A banned user's already-open
+  socket may remain connected until its access token expires, up to 15 minutes,
+  while HTTP requests are blocked immediately. `socket.io` is a runtime
+  dependency for the backend transport; `socket.io-client` is a test-only
+  dependency for real integration coverage.

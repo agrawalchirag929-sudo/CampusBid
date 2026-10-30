@@ -414,8 +414,24 @@ export class AuctionsService {
   }
 
   async detail(auth: AuthContext, auctionId: string): Promise<AuctionDetail> {
+    return this.loadDetail(auctionId, auth.collegeId, auth.userId);
+  }
+
+  async realtimeState(
+    auctionId: string,
+    collegeId: string,
+  ): Promise<AuctionDetail> {
+    return this.loadDetail(auctionId, collegeId);
+  }
+
+  private async loadDetail(
+    auctionId: string,
+    collegeId: string,
+    viewerUserId?: string,
+  ): Promise<AuctionDetail> {
+    const scope = { collegeId };
     const auction = await this.Auction.findOne(
-      collegeScopedFilter<AuctionFields>(auth, {
+      collegeScopedFilter<AuctionFields>(scope, {
         _id: new Types.ObjectId(auctionId),
       }),
     )
@@ -425,12 +441,12 @@ export class AuctionsService {
 
     const [listing, seller, bidders, latestBids] = await Promise.all([
       this.Listing.findOne(
-        collegeScopedFilter<ListingFields>(auth, { _id: auction.listingId }),
+        collegeScopedFilter<ListingFields>(scope, { _id: auction.listingId }),
       )
         .lean()
         .exec(),
       this.User.findOne(
-        collegeScopedFilter<UserFields>(auth, { _id: auction.sellerId }),
+        collegeScopedFilter<UserFields>(scope, { _id: auction.sellerId }),
       )
         .select({ name: 1 })
         .lean()
@@ -457,7 +473,7 @@ export class AuctionsService {
       amountPaise: bid.amountPaise,
       createdAt: bid.createdAt.toISOString(),
       bidderLabel:
-        bid.bidderId.toString() === auth.userId
+        viewerUserId !== undefined && bid.bidderId.toString() === viewerUserId
           ? 'You'
           : (bidderLabels.get(bid.bidderId.toString()) ?? 'Bidder'),
     }));
