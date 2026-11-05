@@ -9,6 +9,7 @@ import { createCollegeModel } from '../../../src/modules/colleges/model.js';
 import { createUserModel } from '../../../src/modules/users/model.js';
 import { createAuthModels } from '../../../src/modules/auth/models.js';
 import type { MailProvider } from '../../../src/modules/auth/mail-provider.js';
+import type { AuctionNotificationEmailPayload } from '../../../src/modules/notifications/types.js';
 import { MailOutboxWorker } from '../../../src/modules/notifications/worker.js';
 import { createAuctionModels } from '@campusbid/auction-engine';
 import { startMongoReplicaSet } from '../../helpers/mongo-replset.js';
@@ -26,12 +27,19 @@ let clockNow = new Date();
 
 class RecordingMailProvider implements MailProvider {
   readonly sent: Array<{ to: string; name: string; token: string }> = [];
+  readonly notifications: AuctionNotificationEmailPayload[] = [];
   async sendVerificationEmail(message: {
     to: string;
     name: string;
     token: string;
   }): Promise<void> {
     this.sent.push(message);
+  }
+
+  async sendAuctionNotificationEmail(
+    message: AuctionNotificationEmailPayload,
+  ): Promise<void> {
+    this.notifications.push(message);
   }
 }
 
@@ -246,6 +254,9 @@ describe('authentication and college-scoped API', () => {
           providerCalls += 1;
           if (providerCalls === 1)
             throw new Error('temporary provider failure');
+        },
+        async sendAuctionNotificationEmail() {
+          throw new Error('unexpected auction notification');
         },
       },
       process.env.MAIL_OUTBOX_KEY ?? '',

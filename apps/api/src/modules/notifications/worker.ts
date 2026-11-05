@@ -1,6 +1,6 @@
 import type { Model, Types } from 'mongoose';
 import type { MailProvider } from '../auth/mail-provider.js';
-import { decryptVerificationEmail } from './crypto.js';
+import { decryptMailPayload } from './crypto.js';
 import type { MailOutboxFields } from './model.js';
 
 const LOCK_LEASE_MS = 60_000;
@@ -49,11 +49,19 @@ export class MailOutboxWorker {
       if (!job.encryptedPayload) {
         throw new Error('Mail outbox payload is missing');
       }
-      const message = decryptVerificationEmail(
+      const message = decryptMailPayload(
         job.encryptedPayload,
         this.encryptionSecret,
       );
-      await this.provider.sendVerificationEmail(message);
+      if (message.kind === 'verification-email') {
+        await this.provider.sendVerificationEmail({
+          to: message.to,
+          name: message.name,
+          token: message.token,
+        });
+      } else {
+        await this.provider.sendAuctionNotificationEmail(message);
+      }
       await this.outbox
         .updateOne(this.claimFilter(job), {
           $set: {
@@ -94,5 +102,29 @@ export class MailOutboxWorker {
       attempts: job.attempts,
       deliveredAt: null,
     };
+  }
+}
+
+export interface MailWorkerLoopLogger {
+  error(fields: Record<string, unknown>, message: string): void;
+}
+
+function wait(milliseconds: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, milliseconds));
+}
+
+export async function runMailOutboxWorker(
+  worker: MailOutboxWorker,
+  logger: MailWorkerLoopLogger,
+  shouldStop: () => boolean,
+): Promise<void> {
+  while (!shouldStop()) {
+    try {
+      const processed = await worker.processBatch();
+      if (processed === 0 && !shouldStop()) await wait(1_000);
+    } catch (error) {
+      logger.error({ err: error }, 'Mail worker iteration failed');
+      if (!shouldStop()) await wait(1_000);
+    }
   }
 }

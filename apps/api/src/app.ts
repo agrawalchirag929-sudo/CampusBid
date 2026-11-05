@@ -15,6 +15,7 @@ import { createAuthLimiters } from './modules/auth/rate-limits.js';
 import { createCollegeModel } from './modules/colleges/model.js';
 import { createListingModel } from './modules/listings/model.js';
 import { AuctionsService } from './modules/auctions/service.js';
+import { createHandoverSecretModel } from './modules/auctions/handover-secret.js';
 import {
   createAuctionsRouter,
   createMyAuctionsRouter,
@@ -32,7 +33,7 @@ import { AuthorizationError } from './middleware/require-role.js';
 import { createCors } from './middleware/cors.js';
 import { ScopedResourceNotFoundError } from './modules/colleges/scope.js';
 import { createBidsRouter } from './routes/bids.js';
-import { healthRouter } from './routes/health.js';
+import { createHealthRouter } from './routes/health.js';
 
 const logger = pino({
   level: process.env.LOG_LEVEL ?? 'info',
@@ -63,11 +64,6 @@ export interface CreateAppOptions {
 
 export function createApp(options: CreateAppOptions = {}): Express {
   const runtimeConfig = options.config ?? loadConfig();
-  if (runtimeConfig.NODE_ENV === 'production') {
-    throw new Error(
-      'A production MailProvider must be configured before API startup',
-    );
-  }
   const connection = options.connection ?? mongoose.connection;
   const engine = options.engine ?? createAuctionEngine({ connection });
   const authModels = createAuthModels(connection);
@@ -100,7 +96,7 @@ export function createApp(options: CreateAppOptions = {}): Express {
   app.use(createCors(runtimeConfig));
   app.use(express.json({ limit: '64kb' }));
   app.use(cookieParser());
-  app.use('/health', healthRouter);
+  app.use('/health', createHealthRouter(connection));
   app.use(
     '/auth',
     createAuthRouter(
@@ -161,6 +157,7 @@ export async function ensureApiIndexes(): Promise<void> {
       model.init(),
     ),
     createListingModel(mongoose.connection).init(),
+    createHandoverSecretModel(mongoose.connection).init(),
     auctionEngine.ensureIndexes(),
   ]);
 }

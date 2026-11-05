@@ -47,8 +47,9 @@ parameters for the college’s fixed folder. Configure `CLOUDINARY_CLOUD_NAME`,
 
 The auction worker polls for scheduled starts and due closes every five seconds.
 Run it separately with `pnpm --filter @campusbid/api auction:worker`, or set
-`AUCTION_WORKER_MODE=inline` to run the same worker in the API process. Multiple
-workers are safe to run together.
+`RUN_WORKER=true` on one API instance to run activation, closing and the mail
+outbox worker in-process. Multiple auction workers are safe to run together;
+the mail outbox deduplicates notification events across API instances.
 
 For local demos, run `pnpm --filter @campusbid/api auction:seed`. It creates 25
 BMSCE-style listings and verified seller/buyer accounts. Newly generated demo

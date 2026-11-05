@@ -2,7 +2,13 @@ import { Schema, type Connection, type Model } from 'mongoose';
 import type { Types } from 'mongoose';
 
 export interface MailOutboxFields {
-  kind: 'verification-email';
+  kind:
+    | 'verification-email'
+    | 'auction-outbid'
+    | 'auction-won'
+    | 'auction-sold'
+    | 'auction-unsold';
+  dedupeKey: string;
   collegeId: Types.ObjectId;
   userId: Types.ObjectId;
   encryptedPayload: string | null;
@@ -15,7 +21,18 @@ export interface MailOutboxFields {
 
 export const mailOutboxSchema = new Schema<MailOutboxFields>(
   {
-    kind: { type: String, required: true, enum: ['verification-email'] },
+    kind: {
+      type: String,
+      required: true,
+      enum: [
+        'verification-email',
+        'auction-outbid',
+        'auction-won',
+        'auction-sold',
+        'auction-unsold',
+      ],
+    },
+    dedupeKey: { type: String, required: true, maxlength: 300 },
     collegeId: { type: Schema.Types.ObjectId, required: true, ref: 'College' },
     userId: { type: Schema.Types.ObjectId, required: true, ref: 'User' },
     encryptedPayload: { type: String, default: null },
@@ -36,6 +53,14 @@ export const mailOutboxSchema = new Schema<MailOutboxFields>(
 mailOutboxSchema.index(
   { deliveredAt: 1, availableAt: 1, lockedAt: 1, createdAt: 1 },
   { name: 'mail_outbox_dispatch' },
+);
+mailOutboxSchema.index(
+  { dedupeKey: 1 },
+  {
+    unique: true,
+    partialFilterExpression: { dedupeKey: { $type: 'string' } },
+    name: 'mail_outbox_dedupe_unique',
+  },
 );
 mailOutboxSchema.index(
   { collegeId: 1, userId: 1, createdAt: -1 },

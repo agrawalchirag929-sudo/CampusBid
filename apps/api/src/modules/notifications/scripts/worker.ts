@@ -1,7 +1,7 @@
 import mongoose from 'mongoose';
 import pino from 'pino';
 import { loadConfig } from '../../../config.js';
-import { ConsoleMailProvider } from '../../auth/mail-provider.js';
+import { createMailProvider } from '../../auth/mail-provider.js';
 import { createMailOutboxModel } from '../model.js';
 import { MailOutboxWorker } from '../worker.js';
 
@@ -16,7 +16,7 @@ const logger = pino({
 async function main(): Promise<void> {
   const config = loadConfig();
   if (!config.MONGO_URI) throw new Error('MONGO_URI is required');
-  const provider = new ConsoleMailProvider(config.NODE_ENV);
+  const provider = createMailProvider(config);
   await mongoose.connect(config.MONGO_URI, { maxPoolSize: 20 });
   const outbox = createMailOutboxModel(mongoose.connection);
   await outbox.init();

@@ -17,6 +17,7 @@ import { verifyAccessToken } from '../auth/access-token.js';
 import { UserRepository } from '../users/repository.js';
 import { AuctionsService } from '../auctions/service.js';
 import { ScopedResourceNotFoundError } from '../colleges/scope.js';
+import { AuctionNotificationService } from '../notifications/auction-events.js';
 import {
   joinAuctionPayloadSchema,
   leaveAuctionPayloadSchema,
@@ -103,6 +104,10 @@ export function createRealtimeServer(
   const logger = options.logger ?? pino({ level: 'silent' });
   const clock = options.clock ?? (() => new Date());
   const users = new UserRepository(options.connection);
+  const notifications = new AuctionNotificationService(
+    options.connection,
+    options.config.MAIL_OUTBOX_KEY,
+  );
   const auctions = new AuctionsService(
     options.connection,
     options.engine,
@@ -204,6 +209,7 @@ export function createRealtimeServer(
   const handleBidInsert = async (change: RealtimeChange): Promise<void> => {
     const bid = change.fullDocument;
     if (!bid || change.ns?.coll !== 'bids') return;
+    await notifications.handleBid(bid as BidRecord);
     const id = safeAuctionId(bid.auctionId);
     if (!io.sockets.adapter.rooms.has(roomName(id))) return;
     const event = await toBidEvent(bid as BidRecord);
@@ -213,6 +219,9 @@ export function createRealtimeServer(
   const handleAuctionStatus = async (change: RealtimeChange): Promise<void> => {
     const update = auctionStatusFromChange(change);
     if (!update) return;
+    if (update.status === 'ended' || update.status === 'unsold') {
+      await notifications.handleAuctionStatus(update.auctionId, update.status);
+    }
     const auctionId = safeAuctionId(update.auctionId);
     const room = roomName(auctionId);
     if (!io.sockets.adapter.rooms.has(room)) return;

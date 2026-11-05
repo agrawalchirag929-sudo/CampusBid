@@ -67,15 +67,15 @@
 
 ## 2026-10-28: Phase 2 security dependencies
 
-- **Decision:** Use @node-rs/argon2 for Argon2id without a native compile step; jose for JWT signing/verification; Helmet for response headers; cors for the origin allowlist; express-rate-limit for per-IP/per-email limits; and cookie-parser to read refresh cookies. Use a ConsoleMailProvider in development and tests; defer Resend to Phase 5. Use Mongoose QueryFilter<T> in the college-scope helper so scoped filters typecheck directly against Mongoose repositories.
+- **Decision:** Use @node-rs/argon2 for Argon2id without a native compile step; jose for JWT signing/verification; Helmet for response headers; cors for the origin allowlist; express-rate-limit for per-IP/per-email limits; and cookie-parser to read refresh cookies. Use a ConsoleMailProvider in development and tests; production SMTP is added in the 2026-11-05 mail decision below. Use Mongoose QueryFilter<T> in the college-scope helper so scoped filters typecheck directly against Mongoose repositories.
 - **Reason:** These packages provide the required password, token, browser-cookie, and request-protection functions without introducing a mail vendor before its planned phase.
-- **Consequences:** ConsoleMailProvider refuses startup outside development/test. Production mail delivery remains unavailable until the Phase 5 provider is configured.
+- **Consequences:** ConsoleMailProvider refuses startup outside development/test. Production configuration must provide all SMTP settings.
 
 ## 2026-10-28: Mongo-backed verification mail outbox
 
 - **Decision:** Enqueue verification mail in MongoDB in the same transaction as account and token creation. Encrypt the queued recipient, name and raw verification token with AES-256-GCM using the independent MAIL_OUTBOX_KEY; clear the encrypted payload after successful delivery. A separate worker claims jobs with an atomic lease, retries failures with capped backoff, and uses the development/test-only console provider.
 - **Reason:** Durable queued delivery is required by the project rules, while the verification-token collection must retain only a SHA-256 hash.
-- **Consequences:** Delivery is at least once, so a crash after provider send but before acknowledgement may duplicate mail. Keep MAIL_OUTBOX_KEY stable until pending outbox jobs drain; rotating the JWT secret does not affect queued mail. Production mail delivery remains unavailable until a production provider is added.
+- **Consequences:** Delivery is at least once, so a crash after provider send but before acknowledgement may duplicate mail. Keep MAIL_OUTBOX_KEY stable until pending outbox jobs drain; rotating the JWT secret does not affect queued mail. The SMTP provider added in 2026-11-05 uses these encrypted jobs.
 
 ## 2026-10-28: College-scoped listings, auction cancellation, and upload signing
 
@@ -87,9 +87,9 @@
 - **Reason:** The condition serializes cancellation against the bid engine's active-auction update. If the bid commits first, cancellation no longer matches; if cancellation wins first, the bid's active-status filter no longer matches.
 - **Consequences:** Cancellation increments auction version once. Competing workers and requests can retry the conditional update, but cannot both win the bid/cancel race.
 
-- **Decision:** Poll auction activation and closing every five seconds in a standalone worker by default, with an opt-in `AUCTION_WORKER_MODE=inline` API mode. Demo seed data is idempotent, refuses production, and generates passwords only when creating the demo accounts.
+- **Decision:** Poll auction activation and closing every five seconds in a standalone worker by default, with an opt-in `RUN_WORKER=true` API mode that also runs the mail outbox worker. Demo seed data is idempotent, refuses production, and generates passwords only when creating the demo accounts.
 - **Reason:** Database state and conditional updates make multiple worker processes and restarts safe; polling discovers due records without relying on in-process timers as the closing mechanism.
-- **Consequences:** Each newly created demo account’s generated password is printed once. A rerun keeps existing passwords unchanged and does not reveal them again.
+- **Consequences:** Each newly created demo account’s generated password is printed once. A rerun keeps existing passwords unchanged and does not reveal them again. Set `RUN_WORKER=true` on one API instance for a single-process demo deployment; the auction operations and mail delivery are safe to run in separate processes when needed.
 
 ## 2026-10-29: Web auth session and same-origin API routing
 
@@ -117,3 +117,22 @@
   while HTTP requests are blocked immediately. `socket.io` is a runtime
   dependency for the backend transport; `socket.io-client` is a test-only
   dependency for real integration coverage.
+
+## 2026-11-05: SMTP notifications and in-process demo worker
+
+- **Decision:** Use Nodemailer behind the existing `MailProvider` interface for
+  production SMTP, and keep ConsoleMailProvider restricted to development and
+  tests. Queue verification and auction notification messages in the existing
+  AES-GCM encrypted Mongo outbox. The realtime change-stream handler creates
+  outbid, won, sold and unsold jobs; a unique event key deduplicates them across
+  API instances and stream restarts. `RUN_WORKER=true` runs auction polling and
+  mail delivery in the API process for a single-instance demo.
+- **Reason:** The same committed Mongo events already drive realtime state and
+  include worker-driven auction endings. Durable outbox jobs keep SMTP work out
+  of bid handling and do not expose recipients through socket event payloads.
+- **Dependency:** Nodemailer provides the SMTP transport; `@types/nodemailer`
+  supplies its TypeScript declarations and is used only at build time.
+- **Consequences:** SMTP configuration is mandatory in production. Delivery is
+  still at least once: a crash after SMTP accepts a message but before the
+  worker acknowledges the job can send it again. Unique event keys prevent
+  duplicate outbox jobs, not a duplicate send after that crash window.

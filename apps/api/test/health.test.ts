@@ -1,4 +1,5 @@
 import mongoose, { Types } from 'mongoose';
+import express from 'express';
 import { SignJWT } from 'jose';
 import request from 'supertest';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -6,6 +7,7 @@ import { auctionEngine, app, ensureApiIndexes } from '../src/app.js';
 import { createCollegeModel } from '../src/modules/colleges/model.js';
 import { createUserModel } from '../src/modules/users/model.js';
 import { startMongoReplicaSet } from './helpers/mongo-replset.js';
+import { createHealthRouter } from '../src/routes/health.js';
 
 const now = new Date();
 const jwtKey = new TextEncoder().encode(process.env.JWT_SECRET);
@@ -29,7 +31,19 @@ describe('API health, replica-set setup, and authenticated bid adapter', () => {
 
   it('reports healthy without exposing internal details', async () => {
     const response = await request(app).get('/health').expect(200);
-    expect(response.body).toEqual({ status: 'ok' });
+    expect(response.body).toEqual({ status: 'ok', database: 'connected' });
+  });
+
+  it('reports a disconnected database as unavailable', async () => {
+    const disconnected = mongoose.createConnection();
+    const healthApp = express();
+    healthApp.use(createHealthRouter(disconnected));
+    const response = await request(healthApp).get('/').expect(503);
+    expect(response.body).toEqual({
+      status: 'unavailable',
+      database: 'disconnected',
+    });
+    await disconnected.close();
   });
 
   it('runs a MongoDB transaction on the replica set', async () => {
