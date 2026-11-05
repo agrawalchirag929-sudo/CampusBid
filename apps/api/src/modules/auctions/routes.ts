@@ -5,7 +5,10 @@ import {
   type RequestHandler,
   type Response,
 } from 'express';
-import type { CancelAuctionResponse } from '@campusbid/shared';
+import type {
+  AuctionHandoverResponse,
+  CancelAuctionResponse,
+} from '@campusbid/shared';
 import { requireAuth } from '../../middleware/auth-context.js';
 import { requireRole } from '../../middleware/require-role.js';
 import { ScopedResourceNotFoundError } from '../colleges/scope.js';
@@ -13,6 +16,7 @@ import { AuctionRequestError, InvalidAuctionCursorError } from './errors.js';
 import {
   auctionListQuerySchema,
   createAuctionSchema,
+  handoverInputSchema,
   objectIdParamsSchema,
   patchAuctionSchema,
 } from './schemas.js';
@@ -119,6 +123,34 @@ export function createAuctionsRouter(
     }
   });
 
+  router.post(
+    '/:id/handover',
+    authenticate,
+    seller,
+    async (request, response, next) => {
+      const params = objectIdParamsSchema.safeParse(request.params);
+      const body = handoverInputSchema.safeParse(request.body as unknown);
+      if (!params.success) {
+        response.status(404).json({ error: 'Not found' });
+        return;
+      }
+      if (!body.success) {
+        response.status(400).json({ error: 'Invalid handover request' });
+        return;
+      }
+      try {
+        const result: AuctionHandoverResponse = await service.confirmHandover(
+          requireAuth(request),
+          params.data.id,
+          body.data.code,
+        );
+        response.status(200).json(result);
+      } catch (error) {
+        next(error);
+      }
+    },
+  );
+
   router.use(
     (
       error: unknown,
@@ -160,7 +192,10 @@ export function createMyAuctionsRouter(
   });
   router.get('/bids', authenticate, async (request, response, next) => {
     try {
-      response.status(200).json(await service.ownBids(requireAuth(request)));
+      response
+        .set('Cache-Control', 'private, no-store')
+        .status(200)
+        .json(await service.ownBids(requireAuth(request)));
     } catch (error) {
       next(error);
     }

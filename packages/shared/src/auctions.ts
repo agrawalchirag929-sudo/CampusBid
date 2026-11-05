@@ -108,6 +108,10 @@ export const myBidSchema = z
   .object({
     amountPaise: z.number().int().nonnegative(),
     createdAt: z.string().datetime(),
+    handoverCode: z
+      .string()
+      .regex(/^\d{6}$/)
+      .optional(),
     auction: z
       .object({
         id: z.string(),
@@ -120,6 +124,17 @@ export const myBidSchema = z
   })
   .strict();
 export type MyBid = z.infer<typeof myBidSchema>;
+
+export const auctionHandoverResponseSchema = z
+  .object({
+    id: z.string(),
+    status: z.literal('paid'),
+    version: z.number().int().nonnegative(),
+  })
+  .strict();
+export type AuctionHandoverResponse = z.infer<
+  typeof auctionHandoverResponseSchema
+>;
 
 export const signedUploadParamsSchema = z
   .object({

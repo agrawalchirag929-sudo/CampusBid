@@ -28,6 +28,8 @@ import { createApp } from '../../../src/app.js';
 import { createCollegeModel } from '../../../src/modules/colleges/model.js';
 import { createListingModel } from '../../../src/modules/listings/model.js';
 import { createUserModel } from '../../../src/modules/users/model.js';
+import { createHandoverSecretModel } from '../../../src/modules/auctions/handover-secret.js';
+import { createMailOutboxModel } from '../../../src/modules/notifications/model.js';
 import {
   createRealtimeServer,
   type RealtimeServerHandle,
@@ -46,6 +48,8 @@ const { Auction, Bid } = createAuctionModels(mongoose.connection);
 const User = createUserModel(mongoose.connection);
 const College = createCollegeModel(mongoose.connection);
 const Listing = createListingModel(mongoose.connection);
+const HandoverSecret = createHandoverSecretModel(mongoose.connection);
+const MailOutbox = createMailOutboxModel(mongoose.connection);
 
 let stopReplicaSet: (() => Promise<void>) | undefined;
 let collegeA: Types.ObjectId;
@@ -234,6 +238,8 @@ beforeAll(async () => {
     College.init(),
     User.init(),
     Listing.init(),
+    HandoverSecret.init(),
+    MailOutbox.init(),
     Auction.init(),
     Bid.init(),
   ]);
@@ -246,6 +252,8 @@ beforeEach(async () => {
     College.init(),
     User.init(),
     Listing.init(),
+    HandoverSecret.init(),
+    MailOutbox.init(),
     Auction.init(),
     Bid.init(),
   ]);
@@ -405,10 +413,36 @@ describe('realtime Socket.IO layer', () => {
       'auction.ended',
     );
     const unsold = waitForEvent<{ version: number }>(client, 'auction.unsold');
+    const handoverState = waitForEvent<{
+      auctionId: string;
+      version: number;
+      snapshot: { status: string; version: number };
+    }>(client, 'auction.state');
     const closed = await engine.closeDueAuctions(new Date());
     expect(closed).toHaveLength(2);
     expect((await ended).winnerLabel).toBe('Bidder 1');
     expect((await unsold).version).toBe(2);
+    expect(await handoverState).toMatchObject({
+      auctionId: soldAuctionId.toString(),
+      version: 3,
+      snapshot: { status: 'ended', version: 3 },
+    });
+    const notificationJobs = await MailOutbox.find({
+      dedupeKey: {
+        $in: [
+          `auction:${soldAuctionId.toString()}:won`,
+          `auction:${soldAuctionId.toString()}:sold`,
+          `auction:${unsoldAuctionId.toString()}:unsold`,
+        ],
+      },
+    })
+      .lean()
+      .exec();
+    expect(notificationJobs.map((job) => job.kind).sort()).toEqual([
+      'auction-sold',
+      'auction-unsold',
+      'auction-won',
+    ]);
 
     const cancelAuctionId = await makeAuction({ status: 'scheduled' });
     expect((await joinAuction(client, cancelAuctionId)).ok).toBe(true);

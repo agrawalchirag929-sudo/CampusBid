@@ -27,6 +27,9 @@ export interface AuctionFields {
   currentBidId: Types.ObjectId | null;
   winnerBidId: Types.ObjectId | null;
   extensionCount: number;
+  handoverCodeHash?: string | null;
+  handoverAttempts?: number;
+  handoverConfirmedAt?: Date | null;
 }
 
 export interface StoredAuctionSnapshot {

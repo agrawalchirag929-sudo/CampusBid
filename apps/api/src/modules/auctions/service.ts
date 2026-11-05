@@ -9,9 +9,12 @@ import type {
   AuctionFields,
   AuctionSnapshot,
   BidFields,
+  AuctionStatus,
 } from '@campusbid/auction-engine';
+import { assertAuctionTransition } from '@campusbid/auction-engine';
 import type {
   AuctionDetail,
+  AuctionHandoverResponse,
   AuctionListItem,
   AuctionPage,
   CreateAuctionResponse,
@@ -43,6 +46,8 @@ import type {
   CreateAuctionInput,
   PatchAuctionInput,
 } from './schemas.js';
+import { createHandoverSecretModel } from './handover-secret.js';
+import { decryptHandoverCode, hashHandoverCode } from './handover-code.js';
 
 const MIN_AUCTION_DURATION_MS = 10 * 60 * 1_000;
 const MAX_AUCTION_DURATION_MS = 14 * 24 * 60 * 60 * 1_000;
@@ -246,6 +251,7 @@ export class AuctionsService {
   private readonly User;
   private readonly Auction;
   private readonly Bid;
+  private readonly HandoverSecret;
 
   constructor(
     private readonly connection: Connection,
@@ -257,6 +263,7 @@ export class AuctionsService {
     this.User = createUserModel(connection);
     this.Auction = engine.models.Auction;
     this.Bid = engine.models.Bid;
+    this.HandoverSecret = createHandoverSecretModel(connection);
   }
 
   async create(
@@ -552,6 +559,40 @@ export class AuctionsService {
     const listingById = new Map(
       listings.map((listing) => [listing._id.toString(), listing]),
     );
+    const winningBids = bids.filter((bid) => {
+      const auction = auctionById.get(bid.auctionId.toString());
+      return (
+        auction?.status === 'ended' &&
+        auction.winnerBidId?.toString() === bid._id.toString()
+      );
+    });
+    const handoverSecrets = winningBids.length
+      ? await this.HandoverSecret.find({
+          collegeId: new Types.ObjectId(auth.collegeId),
+          winnerId: new Types.ObjectId(auth.userId),
+          winnerBidId: { $in: winningBids.map((bid) => bid._id) },
+          consumedAt: null,
+          encryptedCode: { $ne: null },
+        })
+          .select('+encryptedCode')
+          .lean()
+          .exec()
+      : [];
+    const handoverCodeByBidId = new Map(
+      handoverSecrets.flatMap((secret) =>
+        secret.encryptedCode
+          ? [
+              [
+                secret.winnerBidId.toString(),
+                decryptHandoverCode(
+                  secret.encryptedCode,
+                  this.config.MAIL_OUTBOX_KEY,
+                ),
+              ] as const,
+            ]
+          : [],
+      ),
+    );
     return bids.flatMap((bid) => {
       const auction = auctionById.get(bid.auctionId.toString());
       const listing = auction
@@ -560,6 +601,9 @@ export class AuctionsService {
       if (!auction || !listing) return [];
       return [
         {
+          ...(handoverCodeByBidId.has(bid._id.toString())
+            ? { handoverCode: handoverCodeByBidId.get(bid._id.toString()) }
+            : {}),
           amountPaise: bid.amountPaise,
           createdAt: bid.createdAt.toISOString(),
           auction: {
@@ -572,6 +616,134 @@ export class AuctionsService {
         },
       ];
     });
+  }
+
+  async confirmHandover(
+    auth: AuthContext,
+    auctionId: string,
+    code: string,
+  ): Promise<AuctionHandoverResponse> {
+    assertRole(auth.roles, 'SELLER');
+    assertAuctionTransition('ended', 'paid');
+    const id = new Types.ObjectId(auctionId);
+    const userId = new Types.ObjectId(auth.userId);
+    const scopedFilter = collegeScopedFilter<AuctionFields>(auth, {
+      _id: id,
+      sellerId: userId,
+    });
+    const scopedAuction = await this.Auction.findOne(
+      collegeScopedFilter<AuctionFields>(auth, { _id: id }),
+    )
+      .lean()
+      .exec();
+    if (!scopedAuction) throw new ScopedResourceNotFoundError();
+    assertOwner(scopedAuction.sellerId.toString(), auth);
+    if (scopedAuction.sellerId.toString() !== auth.userId) {
+      throw new ScopedResourceNotFoundError();
+    }
+    const codeHash = hashHandoverCode(
+      id.toString(),
+      code,
+      this.config.JWT_SECRET,
+    );
+    const now = this.clock();
+    const session = await this.connection.startSession();
+    let paidVersion: number | undefined;
+    try {
+      await session.withTransaction(async () => {
+        paidVersion = undefined;
+        const updated = await this.Auction.findOneAndUpdate(
+          {
+            ...scopedFilter,
+            status: 'ended',
+            winnerBidId: { $ne: null },
+            handoverCodeHash: codeHash,
+            $or: [
+              { handoverAttempts: { $lt: 5 } },
+              { handoverAttempts: { $exists: false } },
+            ],
+          },
+          {
+            $set: {
+              status: 'paid' satisfies AuctionStatus,
+              handoverConfirmedAt: now,
+              handoverCodeHash: null,
+            },
+            $inc: { version: 1 },
+          },
+          { session, returnDocument: 'after', runValidators: true },
+        )
+          .lean()
+          .exec();
+        if (!updated?.winnerBidId) return;
+        const secretUpdate = await this.HandoverSecret.updateOne(
+          {
+            auctionId: id,
+            consumedAt: null,
+          },
+          { $set: { encryptedCode: null, consumedAt: now } },
+          { session },
+        ).exec();
+        if (secretUpdate.matchedCount !== 1) {
+          throw new Error('Handover secret missing for auction winner');
+        }
+        paidVersion = updated.version;
+      });
+    } finally {
+      await session.endSession();
+    }
+
+    if (paidVersion !== undefined) {
+      return { id: auctionId, status: 'paid', version: paidVersion };
+    }
+
+    const current = await this.Auction.findOne(scopedFilter)
+      .select('+handoverCodeHash')
+      .lean()
+      .exec();
+    if (!current) throw new ScopedResourceNotFoundError();
+    if (current.status !== 'ended') {
+      throw new AuctionRequestError(409, 'Auction is not awaiting handover');
+    }
+    if (!current.winnerBidId || !current.handoverCodeHash) {
+      throw new AuctionRequestError(409, 'Handover code is not ready');
+    }
+    if ((current.handoverAttempts ?? 0) >= 5) {
+      throw new AuctionRequestError(409, 'Handover attempt limit reached');
+    }
+
+    const failedAttempt = await this.Auction.findOneAndUpdate(
+      {
+        ...scopedFilter,
+        status: 'ended',
+        winnerBidId: { $ne: null },
+        handoverCodeHash: { $exists: true, $nin: [null, codeHash] },
+        $or: [
+          { handoverAttempts: { $lt: 5 } },
+          { handoverAttempts: { $exists: false } },
+        ],
+      },
+      { $inc: { handoverAttempts: 1, version: 1 } },
+      { returnDocument: 'after', runValidators: true },
+    )
+      .lean()
+      .exec();
+    if (failedAttempt) {
+      throw new AuctionRequestError(400, 'Invalid handover code');
+    }
+
+    const latest = await this.Auction.findOne(scopedFilter)
+      .select('+handoverCodeHash')
+      .lean()
+      .exec();
+    if (!latest) throw new ScopedResourceNotFoundError();
+    if (latest.status !== 'ended') {
+      throw new AuctionRequestError(409, 'Auction is not awaiting handover');
+    }
+    if ((latest.handoverAttempts ?? 0) >= 5) {
+      throw new AuctionRequestError(409, 'Handover attempt limit reached');
+    }
+    throw new AuctionRequestError(409, 'Handover state changed; retry');
   }
 
   async patch(

@@ -79,6 +79,22 @@ export const auctionSchema = new Schema<AuctionFields>(
         message: 'Must be a non-negative integer',
       },
     },
+    handoverCodeHash: {
+      type: String,
+      default: null,
+      select: false,
+      maxlength: 64,
+    },
+    handoverAttempts: {
+      type: Number,
+      default: 0,
+      min: 0,
+      validate: {
+        validator: (value: number) => Number.isSafeInteger(value) && value >= 0,
+        message: 'Must be a non-negative integer',
+      },
+    },
+    handoverConfirmedAt: { type: Date, default: null },
   },
   { collection: 'auctions', versionKey: false },
 );

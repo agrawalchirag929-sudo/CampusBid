@@ -25,6 +25,7 @@ import {
 } from '@campusbid/shared';
 import {
   AuctionChangeStream,
+  auctionHandoverStateFromChange,
   auctionStatusFromChange,
   type RealtimeChange,
 } from './change-stream.js';
@@ -107,6 +108,7 @@ export function createRealtimeServer(
   const notifications = new AuctionNotificationService(
     options.connection,
     options.config.MAIL_OUTBOX_KEY,
+    options.config.JWT_SECRET,
   );
   const auctions = new AuctionsService(
     options.connection,
@@ -278,11 +280,33 @@ export function createRealtimeServer(
     }
   };
 
+  const handleHandoverState = async (change: RealtimeChange): Promise<void> => {
+    const update = auctionHandoverStateFromChange(change);
+    if (!update) return;
+    const auctionId = safeAuctionId(update.auctionId);
+    const room = roomName(auctionId);
+    const socketId = io.sockets.adapter.rooms.get(room)?.values().next().value;
+    const socket = socketId ? io.sockets.sockets.get(socketId) : undefined;
+    if (!socket) return;
+    try {
+      const state = await stateFor(auctionId, socket.data.auth.collegeId);
+      io.to(room).emit('auction.state', state);
+    } catch (error) {
+      logger.error(
+        { err: error, auctionId, version: update.version },
+        'Auction handover state emit failed',
+      );
+    }
+  };
+
   const stream = new AuctionChangeStream(
     options.connection,
     async (change) => {
       if (change.operationType === 'insert') await handleBidInsert(change);
-      else await handleAuctionStatus(change);
+      else {
+        await handleAuctionStatus(change);
+        await handleHandoverState(change);
+      }
     },
     async () => {
       for (const name of io.sockets.adapter.rooms.keys()) {

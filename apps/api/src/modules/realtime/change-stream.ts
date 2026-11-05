@@ -22,8 +22,24 @@ const relevantChangePipeline: PipelineStage[] = [
           operationType: 'update',
           'ns.coll': 'auctions',
           'updateDescription.updatedFields.status': {
-            $in: ['active', 'ended', 'unsold', 'cancelled'],
+            $in: ['active', 'ended', 'paid', 'unsold', 'cancelled'],
           },
+        },
+        {
+          operationType: 'update',
+          'ns.coll': 'auctions',
+          $or: [
+            {
+              'updateDescription.updatedFields.handoverCodeHash': {
+                $exists: true,
+              },
+            },
+            {
+              'updateDescription.updatedFields.handoverAttempts': {
+                $exists: true,
+              },
+            },
+          ],
         },
       ],
     },
@@ -157,4 +173,29 @@ export function auctionStatusFromChange(change: RealtimeChange): {
     status: status as AuctionFields['status'],
     version,
   };
+}
+
+export function auctionHandoverStateFromChange(change: RealtimeChange): {
+  auctionId: Types.ObjectId;
+  version: number;
+} | null {
+  if (change.operationType !== 'update' || change.ns?.coll !== 'auctions')
+    return null;
+  const fields = change.updateDescription?.updatedFields;
+  const auctionId = change.documentKey?._id;
+  const version = fields?.version;
+  const relevantField =
+    Object.hasOwn(fields ?? {}, 'handoverCodeHash') ||
+    Object.hasOwn(fields ?? {}, 'handoverAttempts') ||
+    fields?.status === 'paid';
+  if (
+    !auctionId ||
+    !relevantField ||
+    typeof version !== 'number' ||
+    !Number.isSafeInteger(version) ||
+    version < 0
+  ) {
+    return null;
+  }
+  return { auctionId, version };
 }

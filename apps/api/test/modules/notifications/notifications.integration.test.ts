@@ -7,6 +7,8 @@ import {
 } from '@campusbid/auction-engine';
 import type { MailProvider } from '../../../src/modules/auth/mail-provider.js';
 import { createListingModel } from '../../../src/modules/listings/model.js';
+import { decryptHandoverCode } from '../../../src/modules/auctions/handover-code.js';
+import { createHandoverSecretModel } from '../../../src/modules/auctions/handover-secret.js';
 import { AuctionNotificationService } from '../../../src/modules/notifications/auction-events.js';
 import { decryptMailPayload } from '../../../src/modules/notifications/crypto.js';
 import { createMailOutboxModel } from '../../../src/modules/notifications/model.js';
@@ -45,6 +47,7 @@ describe('auction email notifications', () => {
   const Listing = createListingModel(mongoose.connection);
   const User = createUserModel(mongoose.connection);
   const MailOutbox = createMailOutboxModel(mongoose.connection);
+  const HandoverSecret = createHandoverSecretModel(mongoose.connection);
 
   beforeAll(async () => {
     const replicaSet = await startMongoReplicaSet();
@@ -56,12 +59,14 @@ describe('auction email notifications', () => {
     notifications = new AuctionNotificationService(
       mongoose.connection,
       outboxKey,
+      process.env.JWT_SECRET ?? '',
     );
     await Promise.all([
       engine.ensureIndexes(),
       Listing.init(),
       User.init(),
       MailOutbox.init(),
+      HandoverSecret.init(),
     ]);
   }, 120_000);
 
@@ -213,7 +218,21 @@ describe('auction email notifications', () => {
     ).toMatchObject({
       to: 'winner@bmsce.example',
       amountPaise: 12_000,
+      handoverCode: expect.stringMatching(/^\d{6}$/),
     });
+    const wonEmail = provider.notifications.find(
+      (message) => message.kind === 'auction-won',
+    );
+    const handoverSecret = await HandoverSecret.findOne({ auctionId })
+      .select('+encryptedCode')
+      .lean()
+      .exec();
+    expect(handoverSecret?.encryptedCode).toBeTruthy();
+    expect(
+      decryptHandoverCode(handoverSecret?.encryptedCode ?? '', outboxKey),
+    ).toBe(
+      wonEmail?.kind === 'auction-won' ? wonEmail.handoverCode : undefined,
+    );
   });
 
   it('queues an unsold notification to the seller once', async () => {

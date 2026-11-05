@@ -32,4 +32,8 @@ describe('auction state machine', () => {
       expect(error).toMatchObject({ from: 'draft', to: 'active' });
     }
   });
+
+  it('allows an ended auction to become paid after seller handover', () => {
+    expect(() => assertAuctionTransition('ended', 'paid')).not.toThrow();
+  });
 });

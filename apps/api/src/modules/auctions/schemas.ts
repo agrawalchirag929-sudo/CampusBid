@@ -66,3 +66,7 @@ export type AuctionListQuery = z.infer<typeof auctionListQuerySchema>;
 export const objectIdParamsSchema = z
   .object({ id: z.string().regex(/^[\da-f]{24}$/i) })
   .strict();
+
+export const handoverInputSchema = z
+  .object({ code: z.string().regex(/^\d{6}$/) })
+  .strict();

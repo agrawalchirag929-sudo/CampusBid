@@ -136,3 +136,25 @@
   still at least once: a crash after SMTP accepts a message but before the
   worker acknowledges the job can send it again. Unique event keys prevent
   duplicate outbox jobs, not a duplicate send after that crash window.
+
+## 2026-11-05: One-time seller handover code
+
+- **Decision:** Generate a cryptographically random six-digit handover code
+  when a winning auction ends. Store a keyed SHA-256 hash on the auction and
+  keep the recoverable value only as AES-GCM ciphertext in a separate,
+  college-scoped `handoverSecrets` record and the encrypted won-email outbox
+  job. Return the code only to the winning buyer through `/me/bids`; clear the
+  hash and encrypted secret when the seller confirms the handover.
+- **Reason:** The winner needs to retrieve the code after the won email is
+  delivered, while neither the auction record nor the secret collection should
+  contain plaintext. The auction's conditional state update and secret/outbox
+  inserts share a transaction so only one code is issued across API instances.
+  Failed codes increment an atomic attempt counter capped at five. Correct
+  confirmation changes `ended` to `paid` in a transaction and can succeed only
+  once.
+- **Consequences:** The code's HMAC uses `JWT_SECRET`; its recoverable
+  ciphertext uses `MAIL_OUTBOX_KEY`, which must remain stable while unsettled
+  handovers exist. A wrong-code attempt can be retried up to five times; only
+  the same-college auction seller may submit it. Change-stream consumers send a
+  public `auction.state` snapshot after handover metadata changes so the
+  existing auction version remains in sync without exposing the code.

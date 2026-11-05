@@ -5,6 +5,12 @@ import type {
   BidRecord,
 } from '@campusbid/auction-engine';
 import { createAuctionModels } from '@campusbid/auction-engine';
+import {
+  encryptHandoverCode,
+  generateHandoverCode,
+  hashHandoverCode,
+} from '../auctions/handover-code.js';
+import { createHandoverSecretModel } from '../auctions/handover-secret.js';
 import { createListingModel, type ListingFields } from '../listings/model.js';
 import { createUserModel, type UserFields } from '../users/model.js';
 import { MailOutboxRepository } from './repository.js';
@@ -20,14 +26,20 @@ export class AuctionNotificationService {
   private readonly Bid: Model<BidFields>;
   private readonly Listing: Model<ListingFields>;
   private readonly User: Model<UserFields>;
+  private readonly HandoverSecret: ReturnType<typeof createHandoverSecretModel>;
   private readonly mailOutbox: MailOutboxRepository;
 
-  constructor(connection: Connection, encryptionSecret: string) {
+  constructor(
+    private readonly connection: Connection,
+    private readonly encryptionSecret: string,
+    private readonly handoverHashSecret: string,
+  ) {
     const auctionModels = createAuctionModels(connection);
     this.Auction = auctionModels.Auction;
     this.Bid = auctionModels.Bid;
     this.Listing = createListingModel(connection);
     this.User = createUserModel(connection);
+    this.HandoverSecret = createHandoverSecretModel(connection);
     this.mailOutbox = new MailOutboxRepository(connection, encryptionSecret);
   }
 
@@ -126,30 +138,73 @@ export class AuctionNotificationService {
     );
     if (!winner) return;
 
-    await Promise.all([
-      this.mailOutbox.enqueueAuctionNotificationEmail(
-        {
-          kind: 'auction-won',
-          to: winner.email,
-          name: winner.name,
-          auctionTitle: listing.title,
-          amountPaise: winnerBid.amountPaise,
-        },
-        { userId: winner._id, collegeId: auction.collegeId },
-        `auction:${auctionId.toString()}:won`,
-      ),
-      this.mailOutbox.enqueueAuctionNotificationEmail(
-        {
-          kind: 'auction-sold',
-          to: seller.email,
-          name: seller.name,
-          auctionTitle: listing.title,
-          amountPaise: winnerBid.amountPaise,
-        },
-        { userId: seller._id, collegeId: auction.collegeId },
-        `auction:${auctionId.toString()}:sold`,
-      ),
-    ]);
+    const handoverCode = generateHandoverCode();
+    const handoverCodeHash = hashHandoverCode(
+      auctionId.toString(),
+      handoverCode,
+      this.handoverHashSecret,
+    );
+    const session = await this.connection.startSession();
+    try {
+      await session.withTransaction(async () => {
+        const updatedAuction = await this.Auction.findOneAndUpdate(
+          {
+            _id: auctionId,
+            collegeId: auction.collegeId,
+            status: 'ended',
+            winnerBidId: winnerBid._id,
+            handoverCodeHash: null,
+          },
+          {
+            $set: { handoverCodeHash, handoverAttempts: 0 },
+            $inc: { version: 1 },
+          },
+          { session, returnDocument: 'after' },
+        )
+          .lean()
+          .exec();
+        if (!updatedAuction) return;
+
+        await new this.HandoverSecret({
+          auctionId,
+          collegeId: auction.collegeId,
+          winnerBidId: winnerBid._id,
+          winnerId: winner._id,
+          encryptedCode: encryptHandoverCode(
+            handoverCode,
+            this.encryptionSecret,
+          ),
+          consumedAt: null,
+        }).save({ session });
+        await this.mailOutbox.enqueueAuctionNotificationEmail(
+          {
+            kind: 'auction-won',
+            to: winner.email,
+            name: winner.name,
+            auctionTitle: listing.title,
+            amountPaise: winnerBid.amountPaise,
+            handoverCode,
+          },
+          { userId: winner._id, collegeId: auction.collegeId },
+          `auction:${auctionId.toString()}:won`,
+          session,
+        );
+        await this.mailOutbox.enqueueAuctionNotificationEmail(
+          {
+            kind: 'auction-sold',
+            to: seller.email,
+            name: seller.name,
+            auctionTitle: listing.title,
+            amountPaise: winnerBid.amountPaise,
+          },
+          { userId: seller._id, collegeId: auction.collegeId },
+          `auction:${auctionId.toString()}:sold`,
+          session,
+        );
+      });
+    } finally {
+      await session.endSession();
+    }
   }
 
   private async findRecipient(
